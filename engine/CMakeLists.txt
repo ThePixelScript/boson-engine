@@ -39,3 +39,6 @@ file(GLOB_RECURSE SOURCES "src/*.cpp")
 
 # Core engine target configuration
 add_executable(boson src/main.cpp ${SOURCES})
+
+# Update the include line inside engine/CMakeLists.txt to match this:
+include_directories(include board)
