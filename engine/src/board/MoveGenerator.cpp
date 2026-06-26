@@ -1,4 +1,6 @@
 #include "board/MoveGenerator.hpp"
+#include "board/UndoState.hpp"
+#include "board/MoveExecutor.hpp"
 #include <bit>
 
 namespace Boson {
@@ -204,6 +206,34 @@ void MoveGenerator::generateKingMoves(const Position& pos, MoveList& moves) noex
     }
 }
 
+void MoveGenerator::generateKnightMoves(const Position& pos, MoveList& moves) noexcept {
+    const Color us = pos.getSideToMove();
+    const Bitboard friendlyOccupancy = pos.getColorOccupancy(us);
+    Bitboard knights = pos.getPieceBitboard((us == Color::White) ? Piece::WhiteKnight : Piece::BlackKnight);
+
+    while (knights) {
+        unsigned long sq = 0;
+        #if defined(_MSC_VER)
+            _BitScanForward64(&sq, knights);
+        #else
+            sq = __builtin_ctzll(knights);
+        #endif
+
+        Bitboard validMoves = s_knightAttacks[sq] & ~friendlyOccupancy;
+        while (validMoves) {
+            unsigned long targetSq = 0;
+            #if defined(_MSC_VER)
+                _BitScanForward64(&targetSq, validMoves);
+            #else
+                targetSq = __builtin_ctzll(validMoves);
+            #endif
+            moves.push_back(Move(static_cast<Square>(sq), static_cast<Square>(targetSq)));
+            validMoves &= validMoves - 1;
+        }
+        knights &= knights - 1;
+    }
+}
+
 void MoveGenerator::generatePawnMoves(const Position& pos, MoveList& moves) noexcept {
     const Color us = pos.getSideToMove();
     const Bitboard enemyOccupancy = pos.getColorOccupancy(!us);
@@ -309,16 +339,16 @@ void MoveGenerator::generatePawnCaptures(const Position& pos, Bitboard pawns, in
 bool MoveGenerator::isSquareAttacked(const Position& pos, Square sq, Color attacker) noexcept {
     const Bitboard totalOcc = pos.getTotalOccupancy();
 
-    // 1. Pawn Attacks (Look backwards using opposing color's capture targets)
+// 1. Pawn Attacks (Look backwards using opposing color's capture targets)
     Bitboard pawns = pos.getPieceBitboard((attacker == Color::White) ? Piece::WhitePawn : Piece::BlackPawn);
+    int sqInt = static_cast<int>(sq);
+
     if (attacker == Color::White) {
-        // Squares a white pawn on 'sq' would capture: up-left (+7) and up-right (+9)
-        // So a white pawn can attack 'sq' if it sits on sq - 7 or sq - 9
-        if (sq >= 7 && ((1ULL << (static_cast<int>(sq) - 7)) & pawns) && (static_cast<int>(sq) % 8 != 0)) return true;
-        if (sq >= 9 && ((1ULL << (static_cast<int>(sq) - 9)) & pawns) && (static_cast<int>(sq) % 8 != 7)) return true;
+        if (sqInt >= 7 && ((1ULL << (sqInt - 7)) & pawns) && (sqInt % 8 != 0)) return true;
+        if (sqInt >= 9 && ((1ULL << (sqInt - 9)) & pawns) && (sqInt % 8 != 7)) return true;
     } else {
-        if (sq <= 56 && ((1ULL << (static_cast<int>(sq) + 9)) & pawns) && (static_cast<int>(sq) % 8 != 0)) return true;
-        if (sq <= 54 && ((1ULL << (static_cast<int>(sq) + 7)) & pawns) && (static_cast<int>(sq) % 8 != 7)) return true;
+        if (sqInt <= 56 && ((1ULL << (sqInt + 9)) & pawns) && (sqInt % 8 != 0)) return true;
+        if (sqInt <= 54 && ((1ULL << (sqInt + 7)) & pawns) && (sqInt % 8 != 7)) return true;
     }
 
     // 2. Knight Attacks
@@ -377,7 +407,7 @@ void MoveGenerator::generateLegalMoves(Position& pos, MoveList& legalMoves) noex
             // Cannot castle if currently in check
             if (inCheck(pos, us)) continue;
             
-            Square from = move.getFromSquare();
+            [[maybe_unused]] Square from = move.getFromSquare();
             Square to = move.getToSquare();
             
             if (to == Square::G1) { // White Kingside (verify f1 passing square)
