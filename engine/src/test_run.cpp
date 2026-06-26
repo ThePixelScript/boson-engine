@@ -11,15 +11,22 @@ void runSanityCheck() {
     // Test 1: Coordinate mapping verification
     Boson::Square sqA1 = Boson::Square::A1;
     Boson::Square sqH8 = Boson::Square::H8;
-    assert(static_cast<int>(sqA1) == 0);
-    assert(static_cast<int>(sqH8) == 63);
+    
+    [[maybe_unused]] int idxA1 = static_cast<int>(sqA1);
+    [[maybe_unused]] int idxH8 = static_cast<int>(sqH8);
+    assert(idxA1 == 0);
+    assert(idxH8 == 63);
     std::cout << "  -> Square coordinate indices: PASS\n";
 
     // Test 2: Bitboard masking lookup
     Boson::Bitboard maskA1 = Boson::Bitboards::getSquareBit(sqA1);
     Boson::Bitboard maskH8 = Boson::Bitboards::getSquareBit(sqH8);
-    assert(maskA1 == 1ULL);
-    assert(maskH8 == (1ULL << 63));
+    
+    // Explicit usage to completely satisfy strict optimization checkers
+    if (maskA1 != 1ULL || maskH8 != (1ULL << 63)) {
+        std::cerr << "CRITICAL FAILURE: Bitboard state mismatch detected.\n";
+        std::exit(1);
+    }
     std::cout << "  -> Bitboard hardware masks: PASS\n";
 
     // Test 3: Bitfield payload movement encoding

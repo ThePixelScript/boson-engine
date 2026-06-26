@@ -6,6 +6,14 @@
 #include "Color.hpp"
 #include "Piece.hpp"
 #include "Castling.hpp"
+// Mutators strictly for the builder/parsing pipeline
+    void setPiece(Square sq, Piece piece) noexcept;
+    void setSideToMove(Color color) noexcept { m_sideToMove = color; }
+    void setEnPassantSquare(Square sq) noexcept { m_enPassantSquare = sq; }
+    void setCastlingRights(CastlingRights rights) noexcept { m_castlingRights = rights; }
+    void setHalfmoveClock(uint16_t clock) noexcept { m_halfmoveClock = clock; }
+    void setFullmoveNumber(uint16_t number) noexcept { m_fullmoveNumber = number; }
+    void updateOccupancy() noexcept;
 
 namespace Boson {
 

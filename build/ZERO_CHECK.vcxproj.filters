@@ -1,0 +1,13 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="18.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <CustomBuild Include="C:\Users\Dell\Desktop\Programming\Project\Boson\build\CMakeFiles\2edac555f2e624d003589d5434aa4b8e\generate.stamp.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="CMake Rules">
+      <UniqueIdentifier>{6A48369A-C496-3FBE-8775-9C21FBC3E8D8}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

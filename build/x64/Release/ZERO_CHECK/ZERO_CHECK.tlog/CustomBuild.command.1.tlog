@@ -1,0 +1,10 @@
+^C:\USERS\DELL\DESKTOP\PROGRAMMING\PROJECT\BOSON\BUILD\CMAKEFILES\2EDAC555F2E624D003589D5434AA4B8E\GENERATE.STAMP.RULE
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SC:/Users/Dell/Desktop/Programming/Project/Boson/engine -BC:/Users/Dell/Desktop/Programming/Project/Boson/build --check-stamp-list CMakeFiles/generate.stamp.list --vs-solution-file C:/Users/Dell/Desktop/Programming/Project/Boson/build/Boson.slnx
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd

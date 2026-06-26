@@ -50,3 +50,22 @@ std::cout << "Side to move: " << (m_sideToMove == Color::White ? "White" : "Blac
 }
 
 } // namespace Boson
+
+void Position::setPiece(Square sq, Piece piece) noexcept {
+    if (sq == Square::None || piece == Piece::None) return;
+    m_pieces[static_cast<size_t>(piece)] |= Bitboards::getSquareBit(sq);
+}
+
+void Position::updateOccupancy() noexcept {
+    m_occupancy[static_cast<size_t>(Color::White)] = Bitboards::Empty;
+    m_occupancy[static_cast<size_t>(Color::Black)] = Bitboards::Empty;
+
+    for (size_t p = 0; p < 6; ++p) {
+        m_occupancy[static_cast<size_t>(Color::White)] |= m_pieces[p];
+    }
+    for (size_t p = 6; p < 12; ++p) {
+        m_occupancy[static_cast<size_t>(Color::Black)] |= m_pieces[p];
+    }
+    m_occupancy[static_cast<size_t>(Color::None)] = 
+        m_occupancy[static_cast<size_t>(Color::White)] | m_occupancy[static_cast<size_t>(Color::Black)];
+}
