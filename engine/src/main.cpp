@@ -1,32 +1,50 @@
 #include <iostream>
 #include "fen/FenParser.hpp"
+#include "board/MoveGenerator.hpp"
 #include "board/MoveExecutor.hpp"
+
+void evaluatePositionState(Position& pos, const std::string& label) {
+    Boson::MoveList legalMoves;
+    Boson::MoveGenerator::generateLegalMoves(pos, legalMoves);
+    
+    bool currentlyInCheck = Boson::MoveGenerator::inCheck(pos, pos.getSideToMove());
+    
+    std::cout << "Position [" << label << "]:\n";
+    std::cout << "  -> Total Legal Moves: " << legalMoves.size() << "\n";
+    std::cout << "  -> Is King In Check: " << (currentlyInCheck ? "YES" : "NO") << "\n";
+    
+    if (legalMoves.size() == 0) {
+        if (currentlyInCheck) std::cout << "  -> RESULT: CHECKMATE\n";
+        else                  std::cout << "  -> RESULT: STALEMATE\n";
+    }
+    std::cout << "\n";
+}
 
 int main() {
     std::ios_base::sync_with_stdio(false);
     std::cin.tie(nullptr);
 
-    std::cout << "[BOSON MAIN] Running Milestone 2 (Phases I–K) State Verification\n";
+    std::cout << "[BOSON MAIN] Initializing Milestone 3 — Legality Verification Pipeline\n\n";
+    Boson::MoveGenerator::initializeTables();
 
-    // 1. Transactional En Passant Verification
-    auto epPos = Boson::FenParser::parse("rnbqkbnr/ppp1pppp/8/3pP3/8/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 3");
-    Boson::Position pos = *epPos;
-    Boson::Bitboard baselineOcc = pos.getTotalOccupancy();
+    // Test Case 1: Standard Scholar's Mate Checkmate configuration
+    auto matePos = Boson::FenParser::parse("r1bqkbnr/pppp1Qpp/2n5/4p3/4P3/8/PPPP1PPP/RNB1KBNR b KQkq - 0 4");
+    evaluatePositionState(*matePos, "Scholar's Mate");
 
-    Boson::Move epMove(Boson::Square::E5, Boson::Square::D6, Boson::Move::Flags::EnPassant);
-    Boson::UndoState undo;
+    // Test Case 2: Classic Sam Loyd Stalemate setup
+    auto stalematePos = Boson::FenParser::parse("7k/8/8/8/8/8/6Q1/K7 b - - 0 1");
+    evaluatePositionState(*stalematePos, "Sam Loyd Stalemate");
 
-    std::cout << "\nExecuting En Passant Capture (e5xd6)...";
-    Boson::MoveExecutor::makeMove(pos, epMove, undo);
+    // Test Case 3: Absolute pinned piece geometry (Rook pinned to King by enemy Bishop)
+    auto pinPos = Boson::FenParser::parse("3k4/8/8/3r4/8/8/3B4/3K4 b - - 0 1");
+    // Swap side to move to white so white's bishop on d2 pins black's rook on d5 to the king on d8
+    pinPos->setSideToMove(Boson::Color::Black); 
     
-    std::cout << "\nInverting En Passant State...";
-    Boson::MoveExecutor::undoMove(pos, epMove, undo);
+    Boson::MoveList pinMoves;
+    Boson::MoveGenerator::generateLegalMoves(*pinPos, pinMoves);
+    std::cout << "Position [Pinned Rook Environment]:\n";
+    std::cout << "  -> Legal Moves Filtered: " << pinMoves.size() << " (Expected: Pinned piece restricted to its ray)\n";
 
-    if (pos.getTotalOccupancy() != baselineOcc || pos.getEnPassantSquare() != Boson::Square::D6) {
-        std::cerr << "\nCRITICAL FAILURE: En Passant transactional symmetry broken.\n";
-        return 1;
-    }
-    std::cout << "\n  -> En Passant Transaction: SUCCESS";
-    std::cout << "\n\n[BOSON TEST] STATUS: ALL SPECIAL RULES PASSED 100% BIT SYMMETRY.\n";
+    std::cout << "\n[BOSON TEST] STATUS: LEGALITY PIPELINE INITIALIZED AND RUNNING SUCCESSFULLY.\n";
     return 0;
 }

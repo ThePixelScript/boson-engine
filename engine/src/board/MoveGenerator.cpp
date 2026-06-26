@@ -306,4 +306,102 @@ void MoveGenerator::generatePawnCaptures(const Position& pos, Bitboard pawns, in
     }
 }
 
+bool MoveGenerator::isSquareAttacked(const Position& pos, Square sq, Color attacker) noexcept {
+    const Bitboard totalOcc = pos.getTotalOccupancy();
+
+    // 1. Pawn Attacks (Look backwards using opposing color's capture targets)
+    Bitboard pawns = pos.getPieceBitboard((attacker == Color::White) ? Piece::WhitePawn : Piece::BlackPawn);
+    if (attacker == Color::White) {
+        // Squares a white pawn on 'sq' would capture: up-left (+7) and up-right (+9)
+        // So a white pawn can attack 'sq' if it sits on sq - 7 or sq - 9
+        if (sq >= 7 && ((1ULL << (static_cast<int>(sq) - 7)) & pawns) && (static_cast<int>(sq) % 8 != 0)) return true;
+        if (sq >= 9 && ((1ULL << (static_cast<int>(sq) - 9)) & pawns) && (static_cast<int>(sq) % 8 != 7)) return true;
+    } else {
+        if (sq <= 56 && ((1ULL << (static_cast<int>(sq) + 9)) & pawns) && (static_cast<int>(sq) % 8 != 0)) return true;
+        if (sq <= 54 && ((1ULL << (static_cast<int>(sq) + 7)) & pawns) && (static_cast<int>(sq) % 8 != 7)) return true;
+    }
+
+    // 2. Knight Attacks
+    Bitboard knights = pos.getPieceBitboard((attacker == Color::White) ? Piece::WhiteKnight : Piece::BlackKnight);
+    if (s_knightAttacks[static_cast<size_t>(sq)] & knights) return true;
+
+    // 3. King Attacks
+    Bitboard king = pos.getPieceBitboard((attacker == Color::White) ? Piece::WhiteKing : Piece::BlackKing);
+    if (s_kingAttacks[static_cast<size_t>(sq)] & king) return true;
+
+    // 4. Bishop & Queen Diagonal Attacks
+    Bitboard diagonalAttackers = pos.getPieceBitboard((attacker == Color::White) ? Piece::WhiteBishop : Piece::BlackBishop) |
+                                 pos.getPieceBitboard((attacker == Color::White) ? Piece::WhiteQueen : Piece::BlackQueen);
+    if (getBishopAttacks(sq, totalOcc) & diagonalAttackers) return true;
+
+    // 5. Rook & Queen Orthogonal Attacks
+    Bitboard orthogonalAttackers = pos.getPieceBitboard((attacker == Color::White) ? Piece::WhiteRook : Piece::BlackRook) |
+                                   pos.getPieceBitboard((attacker == Color::White) ? Piece::WhiteQueen : Piece::BlackQueen);
+    if (getRookAttacks(sq, totalOcc) & orthogonalAttackers) return true;
+
+    return false;
+}
+
+bool MoveGenerator::inCheck(const Position& pos, Color side) noexcept {
+    Piece targetKing = (side == Color::White) ? Piece::WhiteKing : Piece::BlackKing;
+    Bitboard kingBb = pos.getPieceBitboard(targetKing);
+    if (!kingBb) return false;
+
+    unsigned long kingSq = 0;
+    #if defined(_MSC_VER)
+        _BitScanForward64(&kingSq, kingBb);
+    #else
+        kingSq = __builtin_ctzll(kingBb);
+    #endif
+
+    return isSquareAttacked(pos, static_cast<Square>(kingSq), !side);
+}
+
+void MoveGenerator::generateLegalMoves(Position& pos, MoveList& legalMoves) noexcept {
+    const Color us = pos.getSideToMove();
+    
+    // 1. Gather all candidate moves across every piece category
+    MoveList pseudoMoves;
+    generateKnightMoves(pos, pseudoMoves);
+    generateKingMoves(pos, pseudoMoves);
+    generatePawnMoves(pos, pseudoMoves);
+    generateSlidingMoves(pos, pseudoMoves);
+
+    // 2. Transactionally verify safety of each candidate
+    for (size_t i = 0; i < pseudoMoves.size(); ++i) {
+        const Move& move = pseudoMoves[i];
+        UndoState undo;
+
+        // Special checking gate for Castling moves
+        if (move.isCastling()) {
+            // Cannot castle if currently in check
+            if (inCheck(pos, us)) continue;
+            
+            Square from = move.getFromSquare();
+            Square to = move.getToSquare();
+            
+            if (to == Square::G1) { // White Kingside (verify f1 passing square)
+                if (isSquareAttacked(pos, Square::F1, !us)) continue;
+            } else if (to == Square::C1) { // White Queenside (verify d1 passing square)
+                if (isSquareAttacked(pos, Square::D1, !us)) continue;
+            } else if (to == Square::G8) { // Black Kingside (verify f8 passing square)
+                if (isSquareAttacked(pos, Square::F8, !us)) continue;
+            } else if (to == Square::C8) { // Black Queenside (verify d8 passing square)
+                if (isSquareAttacked(pos, Square::D8, !us)) continue;
+            }
+        }
+
+        // Apply state mutation
+        MoveExecutor::makeMove(pos, move, undo);
+        
+        // Keep move if our king is completely unattacked post-execution
+        if (!inCheck(pos, us)) {
+            legalMoves.push_back(move);
+        }
+
+        // Restore universe back to exact initial baseline
+        MoveExecutor::undoMove(pos, move, undo);
+    }
+}
+
 } // namespace Boson
