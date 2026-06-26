@@ -152,7 +152,7 @@ void MoveGenerator::generatePawnPushes(const Position& pos, Bitboard pawns, int 
     }
 }
 
-void MoveGenerator::generatePawnCaptures(const Position& pos, Bitboard pawns, int direction, Bitboard enemyOccupancy, MoveList& moves) noexcept {
+void MoveGenerator::generatePawnCaptures([[maybe_unused]] const Position& pos, Bitboard pawns, int direction, Bitboard enemyOccupancy, MoveList& moves) noexcept {
     constexpr Bitboard clearA = 0xFEFEFEFEFEFEFEFEULL;
     constexpr Bitboard clearH = 0x7F7F7F7F7F7F7F7FULL;
 
