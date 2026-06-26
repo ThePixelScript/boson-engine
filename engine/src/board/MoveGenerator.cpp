@@ -4,6 +4,8 @@ namespace Boson {
 
 std::array<Bitboard, 64> MoveGenerator::s_knightAttacks{};
 std::array<Bitboard, 64> MoveGenerator::s_kingAttacks{};
+std::array<std::array<Bitboard, 4>, 64> MoveGenerator::s_rookRays{};
+std::array<std::array<Bitboard, 4>, 64> MoveGenerator::s_bishopRays{};
 bool MoveGenerator::s_initialized = false;
 
 void MoveGenerator::initializeTables() noexcept {
@@ -14,11 +16,11 @@ void MoveGenerator::initializeTables() noexcept {
     constexpr Bitboard clearH = 0x7F7F7F7F7F7F7F7FULL;
     constexpr Bitboard clearHG = 0x3F3F3F3F3F3F3F3FULL;
 
+    // --- Leaper Table Generation ---
     for (uint8_t sq = 0; sq < 64; ++sq) {
-        Bitboard kMask = 0ULL;
         Bitboard b = 1ULL << sq;
-
-        // --- Knight Offsets ---
+        
+        Bitboard kMask = 0ULL;
         if (sq < 48) {
             if (b & clearA)  kMask |= (b << 15);
             if (b & clearH)  kMask |= (b << 17);
@@ -37,54 +39,125 @@ void MoveGenerator::initializeTables() noexcept {
         }
         s_knightAttacks[sq] = kMask;
 
-        // --- King Offsets ---
         Bitboard kingMask = 0ULL;
-        if (b & clearA) {
-            kingMask |= (b << 7) | (b >> 1) | (b >> 9);
-        }
-        if (b & clearH) {
-            kingMask |= (b << 9) | (b << 1) | (b >> 7);
-        }
+        if (b & clearA)  kingMask |= (b << 7) | (b >> 1) | (b >> 9);
+        if (b & clearH)  kingMask |= (b << 9) | (b << 1) | (b >> 7);
         kingMask |= (b << 8) | (b >> 8);
         s_kingAttacks[sq] = kingMask;
+
+        // --- Sliding Ray Generation ---
+        int r = sq / 8;
+        int f = sq % 8;
+
+        // Rook Rays (N, S, E, W)
+        for (int i = r + 1; i < 8; ++i) s_rookRays[sq][0] |= (1ULL << (i * 8 + f));
+        for (int i = r - 1; i >= 0; --i) s_rookRays[sq][1] |= (1ULL << (i * 8 + f));
+        for (int i = f + 1; i < 8; ++i) s_rookRays[sq][2] |= (1ULL << (r * 8 + i));
+        for (int i = f - 1; i >= 0; --i) s_rookRays[sq][3] |= (1ULL << (r * 8 + i));
+
+        // Bishop Rays (NE, NW, SE, SW)
+        for (int i = 1; r + i < 8 && f + i < 8; ++i) s_bishopRays[sq][0] |= (1ULL << ((r + i) * 8 + (f + i)));
+        for (int i = 1; r + i < 8 && f - i >= 0; ++i) s_bishopRays[sq][1] |= (1ULL << ((r + i) * 8 + (f - i)));
+        for (int i = 1; r - i >= 0 && f + i < 8; ++i) s_bishopRays[sq][2] |= (1ULL << ((r - i) * 8 + (f + i)));
+        for (int i = 1; r - i >= 0 && f - i >= 0; ++i) s_bishopRays[sq][3] |= (1ULL << ((r - i) * 8 + (f - i)));
     }
 
     s_initialized = true;
 }
 
-void MoveGenerator::generateKnightMoves(const Position& pos, MoveList& moves) noexcept {
+Bitboard MoveGenerator::calculateSlidingAttacks(Square sq, Bitboard occupancy, const std::array<Bitboard, 4>& rays, const std::array<int, 4>& shifts) noexcept {
+    Bitboard attacks = 0ULL;
+
+    for (int dir = 0; dir < 4; ++dir) {
+        Bitboard ray = rays[dir];
+        Bitboard blockers = ray & occupancy;
+
+        if (!blockers) {
+            attacks |= ray;
+        } else {
+            unsigned long blockerSq = 0;
+            // For positive rays (North, East, NE, NW), the closest blocker is the Least Significant Bit (forward scan)
+            // For negative rays (South, West, SE, SW), the closest blocker is the Most Significant Bit (reverse scan)
+            if (shifts[dir] > 0) {
+                #if defined(_MSC_VER)
+                    _BitScanForward64(&blockerSq, blockers);
+                #else
+                    blockerSq = __builtin_ctzll(blockers);
+                #endif
+                attacks |= (ray & ~rays[blockerSq][dir]);
+            } else {
+                #if defined(_MSC_VER)
+                    _BitScanReverse64(&blockerSq, blockers);
+                #else
+                    blockerSq = 63 - __builtin_clzll(blockers);
+                #endif
+                attacks |= (ray & ~rays[blockerSq][dir]);
+            }
+            attacks |= (1ULL << blockerSq); // Include the blocker square itself (ownership filtered at runtime)
+        }
+    }
+    return attacks;
+}
+
+Bitboard MoveGenerator::getRookAttacks(Square sq, Bitboard occupancy) noexcept {
+    // Ray directions: N(+8), S(-8), E(+1), W(-1)
+    constexpr std::array<int, 4> shifts = {1, -1, 1, -1};
+    return calculateSlidingAttacks(sq, occupancy, s_rookRays[static_cast<size_t>(sq)], shifts);
+}
+
+Bitboard MoveGenerator::getBishopAttacks(Square sq, Bitboard occupancy) noexcept {
+    // Ray directions: NE(+9), NW(+7), SE(-7), SW(-9)
+    constexpr std::array<int, 4> shifts = {1, 1, -1, -1};
+    return calculateSlidingAttacks(sq, occupancy, s_bishopRays[static_cast<size_t>(sq)], shifts);
+}
+
+void MoveGenerator::generateSlidingMoves(const Position& pos, MoveList& moves) noexcept {
     const Color us = pos.getSideToMove();
     const Bitboard friendlyOccupancy = pos.getColorOccupancy(us);
-    Bitboard knights = pos.getPieceBitboard((us == Color::White) ? Piece::WhiteKnight : Piece::BlackKnight);
+    const Bitboard totalOccupancy = pos.getTotalOccupancy();
 
-    while (knights) {
-        unsigned long sq = 0;
-        #if defined(_MSC_VER)
-            _BitScanForward64(&sq, knights);
-        #else
-            sq = __builtin_ctzll(knights);
-        #endif
+    std::array<Piece, 3> piecesToGen = {
+        (us == Color::White) ? Piece::WhiteRook : Piece::BlackRook,
+        (us == Color::White) ? Piece::WhiteBishop : Piece::BlackBishop,
+        (us == Color::White) ? Piece::WhiteQueen : Piece::BlackQueen
+    };
 
-        Bitboard validMoves = s_knightAttacks[sq] & ~friendlyOccupancy;
-        while (validMoves) {
-            unsigned long targetSq = 0;
+    for (int i = 0; i < 3; ++i) {
+        Bitboard pieceBb = pos.getPieceBitboard(piecesToGen[i]);
+        while (pieceBb) {
+            unsigned long sq = 0;
             #if defined(_MSC_VER)
-                _BitScanForward64(&targetSq, validMoves);
+                _BitScanForward64(&sq, pieceBb);
             #else
-                targetSq = __builtin_ctzll(validMoves);
+                sq = __builtin_ctzll(pieceBb);
             #endif
-            moves.push_back(Move(static_cast<Square>(sq), static_cast<Square>(targetSq)));
-            validMoves &= validMoves - 1;
+
+            Bitboard attacks = 0ULL;
+            if (i == 0)      attacks = getRookAttacks(static_cast<Square>(sq), totalOccupancy);
+            else if (i == 1) attacks = getBishopAttacks(static_cast<Square>(sq), totalOccupancy);
+            else             attacks = getQueenAttacks(static_cast<Square>(sq), totalOccupancy);
+
+            Bitboard validMoves = attacks & ~friendlyOccupancy;
+            while (validMoves) {
+                unsigned long targetSq = 0;
+                #if defined(_MSC_VER)
+                    _BitScanForward64(&targetSq, validMoves);
+                #else
+                    targetSq = __builtin_ctzll(validMoves);
+                #endif
+                moves.push_back(Move(static_cast<Square>(sq), static_cast<Square>(targetSq)));
+                validMoves &= validMoves - 1;
+            }
+            pieceBb &= pieceBb - 1;
         }
-        knights &= knights - 1;
     }
 }
 
+// Keep your existing Knight, King, and Pawn functions untouched below...
 void MoveGenerator::generateKingMoves(const Position& pos, MoveList& moves) noexcept {
     const Color us = pos.getSideToMove();
     const Bitboard friendlyOccupancy = pos.getColorOccupancy(us);
     Bitboard king = pos.getPieceBitboard((us == Color::White) ? Piece::WhiteKing : Piece::BlackKing);
-
     if (king) {
         unsigned long sq = 0;
         #if defined(_MSC_VER)
@@ -92,7 +165,6 @@ void MoveGenerator::generateKingMoves(const Position& pos, MoveList& moves) noex
         #else
             sq = __builtin_ctzll(king);
         #endif
-
         Bitboard validMoves = s_kingAttacks[sq] & ~friendlyOccupancy;
         while (validMoves) {
             unsigned long targetSq = 0;
@@ -110,21 +182,19 @@ void MoveGenerator::generateKingMoves(const Position& pos, MoveList& moves) noex
 void MoveGenerator::generatePawnMoves(const Position& pos, MoveList& moves) noexcept {
     const Color us = pos.getSideToMove();
     const Bitboard enemyOccupancy = pos.getColorOccupancy(!us);
-    
     if (us == Color::White) {
         Bitboard pawns = pos.getPieceBitboard(Piece::WhitePawn);
-        generatePawnPushes(pos, pawns, 8, 0x000000000000FF00ULL, moves); // Rank 2
+        generatePawnPushes(pos, pawns, 8, 0x000000000000FF00ULL, moves);
         generatePawnCaptures(pos, pawns, 8, enemyOccupancy, moves);
     } else {
         Bitboard pawns = pos.getPieceBitboard(Piece::BlackPawn);
-        generatePawnPushes(pos, pawns, -8, 0x00FF000000000000ULL, moves); // Rank 7
+        generatePawnPushes(pos, pawns, -8, 0x00FF000000000000ULL, moves);
         generatePawnCaptures(pos, pawns, -8, enemyOccupancy, moves);
     }
 }
 
 void MoveGenerator::generatePawnPushes(const Position& pos, Bitboard pawns, int direction, uint64_t startRankMask, MoveList& moves) noexcept {
     const Bitboard totalOccupancy = pos.getTotalOccupancy();
-
     while (pawns) {
         unsigned long sq = 0;
         #if defined(_MSC_VER)
@@ -132,15 +202,10 @@ void MoveGenerator::generatePawnPushes(const Position& pos, Bitboard pawns, int 
         #else
             sq = __builtin_ctzll(pawns);
         #endif
-
-        // Phase C1: Single Push Calculation
         int singlePushTarget = static_cast<int>(sq) + direction;
         Bitboard singlePushMask = 1ULL << singlePushTarget;
-
         if (!(totalOccupancy & singlePushMask)) {
             moves.push_back(Move(static_cast<Square>(sq), static_cast<Square>(singlePushTarget)));
-
-            // Phase C2: Double Push Calculation (Only if single push square was empty)
             if ((1ULL << sq) & startRankMask) {
                 int doublePushTarget = singlePushTarget + direction;
                 if (!(totalOccupancy & (1ULL << doublePushTarget))) {
@@ -155,7 +220,6 @@ void MoveGenerator::generatePawnPushes(const Position& pos, Bitboard pawns, int 
 void MoveGenerator::generatePawnCaptures([[maybe_unused]] const Position& pos, Bitboard pawns, int direction, Bitboard enemyOccupancy, MoveList& moves) noexcept {
     constexpr Bitboard clearA = 0xFEFEFEFEFEFEFEFEULL;
     constexpr Bitboard clearH = 0x7F7F7F7F7F7F7F7FULL;
-
     while (pawns) {
         unsigned long sq = 0;
         #if defined(_MSC_VER)
@@ -163,11 +227,8 @@ void MoveGenerator::generatePawnCaptures([[maybe_unused]] const Position& pos, B
         #else
             sq = __builtin_ctzll(pawns);
         #endif
-
         Bitboard pawnBit = 1ULL << sq;
-        
-        // Phase C3: Diagonal Left and Right Capture Math
-        if (direction == 8) { // White capturing up
+        if (direction == 8) {
             if (pawnBit & clearA) {
                 int target = static_cast<int>(sq) + 7;
                 if (enemyOccupancy & (1ULL << target)) moves.push_back(Move(static_cast<Square>(sq), static_cast<Square>(target)));
@@ -176,7 +237,7 @@ void MoveGenerator::generatePawnCaptures([[maybe_unused]] const Position& pos, B
                 int target = static_cast<int>(sq) + 9;
                 if (enemyOccupancy & (1ULL << target)) moves.push_back(Move(static_cast<Square>(sq), static_cast<Square>(target)));
             }
-        } else { // Black capturing down
+        } else {
             if (pawnBit & clearA) {
                 int target = static_cast<int>(sq) - 9;
                 if (enemyOccupancy & (1ULL << target)) moves.push_back(Move(static_cast<Square>(sq), static_cast<Square>(target)));
