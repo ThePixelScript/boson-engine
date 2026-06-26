@@ -1,4 +1,5 @@
 #include "board/MoveGenerator.hpp"
+#include <bit>
 
 namespace Boson {
 
@@ -16,7 +17,6 @@ void MoveGenerator::initializeTables() noexcept {
     constexpr Bitboard clearH = 0x7F7F7F7F7F7F7F7FULL;
     constexpr Bitboard clearHG = 0x3F3F3F3F3F3F3F3FULL;
 
-    // --- Leaper Table Generation ---
     for (uint8_t sq = 0; sq < 64; ++sq) {
         Bitboard b = 1ULL << sq;
         
@@ -45,17 +45,16 @@ void MoveGenerator::initializeTables() noexcept {
         kingMask |= (b << 8) | (b >> 8);
         s_kingAttacks[sq] = kingMask;
 
-        // --- Sliding Ray Generation ---
         int r = sq / 8;
         int f = sq % 8;
 
-        // Rook Rays (N, S, E, W)
+        // Rook Rays (0=N, 1=S, 2=E, 3=W)
         for (int i = r + 1; i < 8; ++i) s_rookRays[sq][0] |= (1ULL << (i * 8 + f));
         for (int i = r - 1; i >= 0; --i) s_rookRays[sq][1] |= (1ULL << (i * 8 + f));
         for (int i = f + 1; i < 8; ++i) s_rookRays[sq][2] |= (1ULL << (r * 8 + i));
         for (int i = f - 1; i >= 0; --i) s_rookRays[sq][3] |= (1ULL << (r * 8 + i));
 
-        // Bishop Rays (NE, NW, SE, SW)
+        // Bishop Rays (0=NE, 1=NW, 2=SE, 3=SW)
         for (int i = 1; r + i < 8 && f + i < 8; ++i) s_bishopRays[sq][0] |= (1ULL << ((r + i) * 8 + (f + i)));
         for (int i = 1; r + i < 8 && f - i >= 0; ++i) s_bishopRays[sq][1] |= (1ULL << ((r + i) * 8 + (f - i)));
         for (int i = 1; r - i >= 0 && f + i < 8; ++i) s_bishopRays[sq][2] |= (1ULL << ((r - i) * 8 + (f + i)));
@@ -65,8 +64,7 @@ void MoveGenerator::initializeTables() noexcept {
     s_initialized = true;
 }
 
-Bitboard MoveGenerator::calculateSlidingAttacks(Square sq, Bitboard occupancy, const std::array<Bitboard, 4>& rays, const std::array<int, 4>& shifts) noexcept {
-    Bitboard attacks = 0ULL;
+Bitboard MoveGenerator::calculateSlidingAttacks([[maybe_unused]] Square sq, Bitboard occupancy, const std::array<Bitboard, 4>& rays, const std::array<int, 4>& shifts, bool isRook) noexcept {    Bitboard attacks = 0ULL;
 
     for (int dir = 0; dir < 4; ++dir) {
         Bitboard ray = rays[dir];
@@ -76,39 +74,37 @@ Bitboard MoveGenerator::calculateSlidingAttacks(Square sq, Bitboard occupancy, c
             attacks |= ray;
         } else {
             unsigned long blockerSq = 0;
-            // For positive rays (North, East, NE, NW), the closest blocker is the Least Significant Bit (forward scan)
-            // For negative rays (South, West, SE, SW), the closest blocker is the Most Significant Bit (reverse scan)
             if (shifts[dir] > 0) {
                 #if defined(_MSC_VER)
                     _BitScanForward64(&blockerSq, blockers);
                 #else
                     blockerSq = __builtin_ctzll(blockers);
                 #endif
-                attacks |= (ray & ~rays[blockerSq][dir]);
+                Bitboard trailingRay = isRook ? s_rookRays[blockerSq][dir] : s_bishopRays[blockerSq][dir];
+                attacks |= (ray & ~trailingRay);
             } else {
                 #if defined(_MSC_VER)
                     _BitScanReverse64(&blockerSq, blockers);
                 #else
                     blockerSq = 63 - __builtin_clzll(blockers);
                 #endif
-                attacks |= (ray & ~rays[blockerSq][dir]);
+                Bitboard trailingRay = isRook ? s_rookRays[blockerSq][dir] : s_bishopRays[blockerSq][dir];
+                attacks |= (ray & ~trailingRay);
             }
-            attacks |= (1ULL << blockerSq); // Include the blocker square itself (ownership filtered at runtime)
+            attacks |= (1ULL << blockerSq); 
         }
     }
     return attacks;
 }
 
 Bitboard MoveGenerator::getRookAttacks(Square sq, Bitboard occupancy) noexcept {
-    // Ray directions: N(+8), S(-8), E(+1), W(-1)
     constexpr std::array<int, 4> shifts = {1, -1, 1, -1};
-    return calculateSlidingAttacks(sq, occupancy, s_rookRays[static_cast<size_t>(sq)], shifts);
+    return calculateSlidingAttacks(sq, occupancy, s_rookRays[static_cast<size_t>(sq)], shifts, true);
 }
 
 Bitboard MoveGenerator::getBishopAttacks(Square sq, Bitboard occupancy) noexcept {
-    // Ray directions: NE(+9), NW(+7), SE(-7), SW(-9)
     constexpr std::array<int, 4> shifts = {1, 1, -1, -1};
-    return calculateSlidingAttacks(sq, occupancy, s_bishopRays[static_cast<size_t>(sq)], shifts);
+    return calculateSlidingAttacks(sq, occupancy, s_bishopRays[static_cast<size_t>(sq)], shifts, false);
 }
 
 void MoveGenerator::generateSlidingMoves(const Position& pos, MoveList& moves) noexcept {
@@ -153,7 +149,6 @@ void MoveGenerator::generateSlidingMoves(const Position& pos, MoveList& moves) n
     }
 }
 
-// Keep your existing Knight, King, and Pawn functions untouched below...
 void MoveGenerator::generateKingMoves(const Position& pos, MoveList& moves) noexcept {
     const Color us = pos.getSideToMove();
     const Bitboard friendlyOccupancy = pos.getColorOccupancy(us);
