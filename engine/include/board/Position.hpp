@@ -24,6 +24,10 @@ public:
     uint16_t getHalfmoveClock() const noexcept { return m_halfmoveClock; }
     uint16_t getFullmoveNumber() const noexcept { return m_fullmoveNumber; }
 
+    // Surgical mutators for direct high-velocity bit updates
+    void clearPieceBit(Square sq, Piece piece) noexcept { m_pieces[static_cast<size_t>(piece)] &= ~Bitboards::getSquareBit(sq); }
+    void setPieceBit(Square sq, Piece piece) noexcept { m_pieces[static_cast<size_t>(piece)] |= Bitboards::getSquareBit(sq); }
+
     // Mutators strictly for the builder/parsing pipeline
     void setPiece(Square sq, Piece piece) noexcept;
     void setSideToMove(Color color) noexcept { m_sideToMove = color; }
