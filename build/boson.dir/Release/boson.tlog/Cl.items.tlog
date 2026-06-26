@@ -4,3 +4,4 @@ C:\Users\Dell\Desktop\Programming\Project\Boson\engine\src\board\MoveGenerator.c
 C:\Users\Dell\Desktop\Programming\Project\Boson\engine\src\board\Position.cpp;C:\Users\Dell\Desktop\Programming\Project\Boson\build\boson.dir\Release\Position.obj
 C:\Users\Dell\Desktop\Programming\Project\Boson\engine\src\debug\BoardPrinter.cpp;C:\Users\Dell\Desktop\Programming\Project\Boson\build\boson.dir\Release\BoardPrinter.obj
 C:\Users\Dell\Desktop\Programming\Project\Boson\engine\src\fen\FenParser.cpp;C:\Users\Dell\Desktop\Programming\Project\Boson\build\boson.dir\Release\FenParser.obj
+C:\Users\Dell\Desktop\Programming\Project\Boson\engine\src\search\Search.cpp;C:\Users\Dell\Desktop\Programming\Project\Boson\build\boson.dir\Release\Search.obj

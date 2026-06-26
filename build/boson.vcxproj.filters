@@ -19,6 +19,9 @@
     <ClCompile Include="C:\Users\Dell\Desktop\Programming\Project\Boson\engine\src\fen\FenParser.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="C:\Users\Dell\Desktop\Programming\Project\Boson\engine\src\search\Search.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <CustomBuild Include="C:\Users\Dell\Desktop\Programming\Project\Boson\engine\CMakeLists.txt" />

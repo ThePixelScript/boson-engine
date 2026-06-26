@@ -39,13 +39,13 @@ void Search::divide(Position& pos, int depth) noexcept {
         totalNodes += nodesForMove;
         MoveExecutor::undoMove(pos, m, undo);
 
-        // Convert square indices back to coordinate notation for quick terminal debugging
+        // Convert square indices back to coordinate notation with explicit character casting
         int from = static_cast<int>(m.getFromSquare());
         int to = static_cast<int>(m.getToSquare());
-        char fFile = 'a' + (from % 8);
-        char fRank = '1' + (from / 8);
-        char tFile = 'a' + (to % 8);
-        char tRank = '1' + (to / 8);
+        char fFile = static_cast<char>('a' + (from % 8));
+        char fRank = static_cast<char>('1' + (from / 8));
+        char tFile = static_cast<char>('a' + (to % 8));
+        char tRank = static_cast<char>('1' + (to / 8));
         
         std::cout << fFile << fRank << tFile << tRank << " : " << nodesForMove << "\n";
     }
