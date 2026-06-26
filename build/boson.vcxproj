@@ -381,6 +381,7 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="C:\Users\Dell\Desktop\Programming\Project\Boson\engine\src\main.cpp" />
+    <ClCompile Include="C:\Users\Dell\Desktop\Programming\Project\Boson\engine\src\board\MoveExecutor.cpp" />
     <ClCompile Include="C:\Users\Dell\Desktop\Programming\Project\Boson\engine\src\board\Position.cpp" />
     <ClCompile Include="C:\Users\Dell\Desktop\Programming\Project\Boson\engine\src\debug\BoardPrinter.cpp" />
     <ClCompile Include="C:\Users\Dell\Desktop\Programming\Project\Boson\engine\src\fen\FenParser.cpp" />

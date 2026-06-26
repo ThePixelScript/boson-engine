@@ -4,6 +4,9 @@
     <ClCompile Include="C:\Users\Dell\Desktop\Programming\Project\Boson\engine\src\main.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="C:\Users\Dell\Desktop\Programming\Project\Boson\engine\src\board\MoveExecutor.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="C:\Users\Dell\Desktop\Programming\Project\Boson\engine\src\board\Position.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
