@@ -24,9 +24,9 @@ public:
     uint16_t getHalfmoveClock() const noexcept { return m_halfmoveClock; }
     uint16_t getFullmoveNumber() const noexcept { return m_fullmoveNumber; }
 
-    // Surgical mutators for direct high-velocity bit updates
-    void clearPieceBit(Square sq, Piece piece) noexcept { m_pieces[static_cast<size_t>(piece)] &= ~Bitboards::getSquareBit(sq); }
-    void setPieceBit(Square sq, Piece piece) noexcept { m_pieces[static_cast<size_t>(piece)] |= Bitboards::getSquareBit(sq); }
+    // High-Velocity Bit Updating Mutators
+    void clearPieceBit(Square sq, Piece piece) noexcept;
+    void setPieceBit(Square sq, Piece piece) noexcept;
 
     // Mutators strictly for the builder/parsing pipeline
     void setPiece(Square sq, Piece piece) noexcept;
@@ -40,6 +40,13 @@ public:
     void updateOccupancy() noexcept;
     void debugPrintToConsole() const noexcept;
 
+    // Getter for the current position's unique hash
+    uint64_t getHashKey() const noexcept { return m_hashKey; }
+
+    // Decentralized method declarations to drop compilation coupling loops
+    void togglePieceHash(Square sq, Piece piece) noexcept;
+    void toggleSideHash() noexcept;
+
 private:
     std::array<Bitboard, 12> m_pieces;
     std::array<Bitboard, 3>  m_occupancy; // [0] White, [1] Black, [2] Combined Total
@@ -48,7 +55,7 @@ private:
     CastlingRights m_castlingRights;
     uint16_t m_halfmoveClock;
     uint16_t m_fullmoveNumber;
-    uint64_t m_zobristKey; 
+    uint64_t m_hashKey = 0ULL; // Unified incremental tracking data matrix
 };
 
 } // namespace Boson
