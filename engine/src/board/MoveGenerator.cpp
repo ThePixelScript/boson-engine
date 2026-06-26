@@ -64,7 +64,8 @@ void MoveGenerator::initializeTables() noexcept {
     s_initialized = true;
 }
 
-Bitboard MoveGenerator::calculateSlidingAttacks([[maybe_unused]] Square sq, Bitboard occupancy, const std::array<Bitboard, 4>& rays, const std::array<int, 4>& shifts, bool isRook) noexcept {    Bitboard attacks = 0ULL;
+Bitboard MoveGenerator::calculateSlidingAttacks([[maybe_unused]] Square sq, Bitboard occupancy, const std::array<Bitboard, 4>& rays, const std::array<int, 4>& shifts, bool isRook) noexcept {
+    Bitboard attacks = 0ULL;
 
     for (int dir = 0; dir < 4; ++dir) {
         Bitboard ray = rays[dir];
@@ -152,7 +153,9 @@ void MoveGenerator::generateSlidingMoves(const Position& pos, MoveList& moves) n
 void MoveGenerator::generateKingMoves(const Position& pos, MoveList& moves) noexcept {
     const Color us = pos.getSideToMove();
     const Bitboard friendlyOccupancy = pos.getColorOccupancy(us);
+    const Bitboard totalOccupancy = pos.getTotalOccupancy();
     Bitboard king = pos.getPieceBitboard((us == Color::White) ? Piece::WhiteKing : Piece::BlackKing);
+    
     if (king) {
         unsigned long sq = 0;
         #if defined(_MSC_VER)
@@ -160,6 +163,7 @@ void MoveGenerator::generateKingMoves(const Position& pos, MoveList& moves) noex
         #else
             sq = __builtin_ctzll(king);
         #endif
+        
         Bitboard validMoves = s_kingAttacks[sq] & ~friendlyOccupancy;
         while (validMoves) {
             unsigned long targetSq = 0;
@@ -171,12 +175,39 @@ void MoveGenerator::generateKingMoves(const Position& pos, MoveList& moves) noex
             moves.push_back(Move(static_cast<Square>(sq), static_cast<Square>(targetSq)));
             validMoves &= validMoves - 1;
         }
+
+        // --- Phase K: Castling Requirements Logic ---
+        CastlingRights rights = pos.getCastlingRights();
+        if (us == Color::White) {
+            if (static_cast<bool>(rights & CastlingRights::WhiteOO)) {
+                if (!(totalOccupancy & (Bitboards::getSquareBit(Square::F1) | Bitboards::getSquareBit(Square::G1)))) {
+                    moves.push_back(Move(Square::E1, Square::G1, Move::Flags::Castling));
+                }
+            }
+            if (static_cast<bool>(rights & CastlingRights::WhiteOOO)) {
+                if (!(totalOccupancy & (Bitboards::getSquareBit(Square::D1) | Bitboards::getSquareBit(Square::C1) | Bitboards::getSquareBit(Square::B1)))) {
+                    moves.push_back(Move(Square::E1, Square::C1, Move::Flags::Castling));
+                }
+            }
+        } else {
+            if (static_cast<bool>(rights & CastlingRights::BlackOO)) {
+                if (!(totalOccupancy & (Bitboards::getSquareBit(Square::F8) | Bitboards::getSquareBit(Square::G8)))) {
+                    moves.push_back(Move(Square::E8, Square::G8, Move::Flags::Castling));
+                }
+            }
+            if (static_cast<bool>(rights & CastlingRights::BlackOOO)) {
+                if (!(totalOccupancy & (Bitboards::getSquareBit(Square::D8) | Bitboards::getSquareBit(Square::C8) | Bitboards::getSquareBit(Square::B8)))) {
+                    moves.push_back(Move(Square::E8, Square::C8, Move::Flags::Castling));
+                }
+            }
+        }
     }
 }
 
 void MoveGenerator::generatePawnMoves(const Position& pos, MoveList& moves) noexcept {
     const Color us = pos.getSideToMove();
     const Bitboard enemyOccupancy = pos.getColorOccupancy(!us);
+    
     if (us == Color::White) {
         Bitboard pawns = pos.getPieceBitboard(Piece::WhitePawn);
         generatePawnPushes(pos, pawns, 8, 0x000000000000FF00ULL, moves);
@@ -190,6 +221,7 @@ void MoveGenerator::generatePawnMoves(const Position& pos, MoveList& moves) noex
 
 void MoveGenerator::generatePawnPushes(const Position& pos, Bitboard pawns, int direction, uint64_t startRankMask, MoveList& moves) noexcept {
     const Bitboard totalOccupancy = pos.getTotalOccupancy();
+    
     while (pawns) {
         unsigned long sq = 0;
         #if defined(_MSC_VER)
@@ -197,14 +229,26 @@ void MoveGenerator::generatePawnPushes(const Position& pos, Bitboard pawns, int 
         #else
             sq = __builtin_ctzll(pawns);
         #endif
+        
         int singlePushTarget = static_cast<int>(sq) + direction;
         Bitboard singlePushMask = 1ULL << singlePushTarget;
+        
         if (!(totalOccupancy & singlePushMask)) {
-            moves.push_back(Move(static_cast<Square>(sq), static_cast<Square>(singlePushTarget)));
-            if ((1ULL << sq) & startRankMask) {
-                int doublePushTarget = singlePushTarget + direction;
-                if (!(totalOccupancy & (1ULL << doublePushTarget))) {
-                    moves.push_back(Move(static_cast<Square>(sq), static_cast<Square>(doublePushTarget)));
+            // Phase I: Check single push promotion rank bounds
+            if (singlePushTarget >= 56 || singlePushTarget <= 7) {
+                moves.push_back(Move(static_cast<Square>(sq), static_cast<Square>(singlePushTarget), Move::Flags::Promotion, Move::PromotionPiece::Queen));
+                moves.push_back(Move(static_cast<Square>(sq), static_cast<Square>(singlePushTarget), Move::Flags::Promotion, Move::PromotionPiece::Rook));
+                moves.push_back(Move(static_cast<Square>(sq), static_cast<Square>(singlePushTarget), Move::Flags::Promotion, Move::PromotionPiece::Bishop));
+                moves.push_back(Move(static_cast<Square>(sq), static_cast<Square>(singlePushTarget), Move::Flags::Promotion, Move::PromotionPiece::Knight));
+            } else {
+                moves.push_back(Move(static_cast<Square>(sq), static_cast<Square>(singlePushTarget)));
+                
+                // Phase C2: Double Push Calculation
+                if ((1ULL << sq) & startRankMask) {
+                    int doublePushTarget = singlePushTarget + direction;
+                    if (!(totalOccupancy & (1ULL << doublePushTarget))) {
+                        moves.push_back(Move(static_cast<Square>(sq), static_cast<Square>(doublePushTarget), Move::Flags::DoublePawnPush));
+                    }
                 }
             }
         }
@@ -212,9 +256,17 @@ void MoveGenerator::generatePawnPushes(const Position& pos, Bitboard pawns, int 
     }
 }
 
-void MoveGenerator::generatePawnCaptures([[maybe_unused]] const Position& pos, Bitboard pawns, int direction, Bitboard enemyOccupancy, MoveList& moves) noexcept {
+void MoveGenerator::generatePawnCaptures(const Position& pos, Bitboard pawns, int direction, Bitboard enemyOccupancy, MoveList& moves) noexcept {
     constexpr Bitboard clearA = 0xFEFEFEFEFEFEFEFEULL;
     constexpr Bitboard clearH = 0x7F7F7F7F7F7F7F7FULL;
+    const Square epSquare = pos.getEnPassantSquare();
+    
+    // Combine regular enemies and dynamic En Passant targets for tracking
+    Bitboard targetMask = enemyOccupancy;
+    if (epSquare != Square::None) {
+        targetMask |= Bitboards::getSquareBit(epSquare);
+    }
+
     while (pawns) {
         unsigned long sq = 0;
         #if defined(_MSC_VER)
@@ -222,25 +274,33 @@ void MoveGenerator::generatePawnCaptures([[maybe_unused]] const Position& pos, B
         #else
             sq = __builtin_ctzll(pawns);
         #endif
+        
         Bitboard pawnBit = 1ULL << sq;
+        
+        auto checkAndEmitCapture = [&](int targetSquare, Bitboard edgeClearMask) {
+            if (pawnBit & edgeClearMask) {
+                if (targetMask & (1ULL << targetSquare)) {
+                    Move::Flags flag = (static_cast<Square>(targetSquare) == epSquare) ? Move::Flags::EnPassant : Move::Flags::None;
+                    
+                    // Phase I: Capture Promotion Split Check
+                    if (targetSquare >= 56 || targetSquare <= 7) {
+                        moves.push_back(Move(static_cast<Square>(sq), static_cast<Square>(targetSquare), Move::Flags::Promotion, Move::PromotionPiece::Queen));
+                        moves.push_back(Move(static_cast<Square>(sq), static_cast<Square>(targetSquare), Move::Flags::Promotion, Move::PromotionPiece::Rook));
+                        moves.push_back(Move(static_cast<Square>(sq), static_cast<Square>(targetSquare), Move::Flags::Promotion, Move::PromotionPiece::Bishop));
+                        moves.push_back(Move(static_cast<Square>(sq), static_cast<Square>(targetSquare), Move::Flags::Promotion, Move::PromotionPiece::Knight));
+                    } else {
+                        moves.push_back(Move(static_cast<Square>(sq), static_cast<Square>(targetSquare), flag));
+                    }
+                }
+            }
+        };
+
         if (direction == 8) {
-            if (pawnBit & clearA) {
-                int target = static_cast<int>(sq) + 7;
-                if (enemyOccupancy & (1ULL << target)) moves.push_back(Move(static_cast<Square>(sq), static_cast<Square>(target)));
-            }
-            if (pawnBit & clearH) {
-                int target = static_cast<int>(sq) + 9;
-                if (enemyOccupancy & (1ULL << target)) moves.push_back(Move(static_cast<Square>(sq), static_cast<Square>(target)));
-            }
+            checkAndEmitCapture(static_cast<int>(sq) + 7, clearA);
+            checkAndEmitCapture(static_cast<int>(sq) + 9, clearH);
         } else {
-            if (pawnBit & clearA) {
-                int target = static_cast<int>(sq) - 9;
-                if (enemyOccupancy & (1ULL << target)) moves.push_back(Move(static_cast<Square>(sq), static_cast<Square>(target)));
-            }
-            if (pawnBit & clearH) {
-                int target = static_cast<int>(sq) - 7;
-                if (enemyOccupancy & (1ULL << target)) moves.push_back(Move(static_cast<Square>(sq), static_cast<Square>(target)));
-            }
+            checkAndEmitCapture(static_cast<int>(sq) - 9, clearA);
+            checkAndEmitCapture(static_cast<int>(sq) - 7, clearH);
         }
         pawns &= pawns - 1;
     }
