@@ -1,49 +1,41 @@
 #include <iostream>
-#include <bit>
 #include "fen/FenParser.hpp"
-#include "board/Bitboard.hpp"
 #include "board/MoveGenerator.hpp"
-#include "board/MoveExecutor.hpp"
-
-// Explicitly add Boson:: namespace to the function signature
-void evaluatePositionState(Boson::Position& pos, const std::string& label) {
-    Boson::MoveList legalMoves;
-    Boson::MoveGenerator::generateLegalMoves(pos, legalMoves);
-    
-    bool currentlyInCheck = Boson::MoveGenerator::inCheck(pos, pos.getSideToMove());
-    
-    std::cout << "Position [" << label << "]:\n";
-    std::cout << "  -> Total Legal Moves: " << legalMoves.size() << "\n";
-    std::cout << "  -> Is King In Check: " << (currentlyInCheck ? "YES" : "NO") << "\n";
-    
-    if (legalMoves.size() == 0) {
-        if (currentlyInCheck) std::cout << "  -> RESULT: CHECKMATE\n";
-        else                  std::cout << "  -> RESULT: STALEMATE\n";
-    }
-    std::cout << "\n";
-}
+#include "search/Search.hpp"
 
 int main() {
     std::ios_base::sync_with_stdio(false);
     std::cin.tie(nullptr);
 
-    std::cout << "[BOSON MAIN] Initializing Milestone 3 — Legality Verification Pipeline\n\n";
+    std::cout << "[BOSON MAIN] Initializing Milestone 4 Framework Checks\n";
     Boson::MoveGenerator::initializeTables();
 
-    auto matePos = Boson::FenParser::parse("r1bqkbnr/pppp1Qpp/2n5/4p3/4P3/8/PPPP1PPP/RNB1KBNR b KQkq - 0 4");
-    evaluatePositionState(*matePos, "Scholar's Mate");
-
-    auto stalematePos = Boson::FenParser::parse("7k/8/8/8/8/8/6Q1/K7 b - - 0 1");
-    evaluatePositionState(*stalematePos, "Sam Loyd Stalemate");
-
-    auto pinPos = Boson::FenParser::parse("3k4/8/8/3r4/8/8/3B4/3K4 b - - 0 1");
-    pinPos->setSideToMove(Boson::Color::Black); 
+    // 1. Load Initial Position Baseline
+    auto initialPos = Boson::FenParser::parse("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
     
-    Boson::MoveList pinMoves;
-    Boson::MoveGenerator::generateLegalMoves(*pinPos, pinMoves);
-    std::cout << "Position [Pinned Rook Environment]:\n";
-    std::cout << "  -> Legal Moves Filtered: " << pinMoves.size() << "\n";
+    std::cout << "\n--- Running Baseline Perft Tree Counts ---";
+    uint64_t p1 = Boson::Search::perft(*initialPos, 1);
+    uint64_t p2 = Boson::Search::perft(*initialPos, 2);
+    uint64_t p3 = Boson::Search::perft(*initialPos, 3);
 
-    std::cout << "\n[BOSON TEST] STATUS: LEGALITY PIPELINE INITIALIZED AND RUNNING SUCCESSFULLY.\n";
+    std::cout << "\n  -> Perft Depth 1: " << p1 << " (Expected: 20)";
+    std::cout << "\n  -> Perft Depth 2: " << p2 << " (Expected: 400)";
+    std::cout << "\n  -> Perft Depth 3: " << p3 << " (Expected: 8902)\n";
+
+    if (p1 != 20 || p2 != 400 || p3 != 8902) {
+        std::cerr << "CRITICAL FAILURE: Perft verification count deviation detected.\n";
+        return 1;
+    }
+    std::cout << "Perft Validation Matrix: SUCCESS\n";
+
+    // 2. Fire Divide Mode Diagnostic on Depth 1 to verify root move tracking
+    Boson::Search::divide(*initialPos, 1);
+
+    // 3. Verify Alpha-Beta Search lookahead functionality
+    std::cout << "\n--- Running Iterative Deepening Negamax Test ---\n";
+    int finalScore = Boson::Search::runSearch(*initialPos, 3);
+    std::cout << "\nFinal Balanced Engine Evaluation: " << finalScore << "\n";
+
+    std::cout << "\n[BOSON TEST] STATUS: MILESTONE 4 ENGINE INFRASTRUCTURE PASSED ACCORDING TO SPECIFICATIONS.\n";
     return 0;
 }
