@@ -1,4 +1,5 @@
 #include "search/Search.hpp"
+#include "evaluation/Evaluator.hpp"
 #include "board/MoveGenerator.hpp"
 #include "board/MoveExecutor.hpp"
 #include <iostream>
@@ -46,19 +47,7 @@ void Search::divide(Position& pos, int depth) noexcept {
 }
 
 int Search::evaluate(const Position& pos) noexcept {
-    int score = 0;
-    score += std::popcount(pos.getPieceBitboard(Piece::WhitePawn)) * 100;
-    score -= std::popcount(pos.getPieceBitboard(Piece::BlackPawn)) * 100;
-    score += std::popcount(pos.getPieceBitboard(Piece::WhiteKnight)) * 320;
-    score -= std::popcount(pos.getPieceBitboard(Piece::BlackKnight)) * 320;
-    score += std::popcount(pos.getPieceBitboard(Piece::WhiteBishop)) * 330;
-    score -= std::popcount(pos.getPieceBitboard(Piece::BlackBishop)) * 330;
-    score += std::popcount(pos.getPieceBitboard(Piece::WhiteRook)) * 500;
-    score -= std::popcount(pos.getPieceBitboard(Piece::BlackRook)) * 500;
-    score += std::popcount(pos.getPieceBitboard(Piece::WhiteQueen)) * 900;
-    score -= std::popcount(pos.getPieceBitboard(Piece::BlackQueen)) * 900;
-
-    return (pos.getSideToMove() == Color::White) ? score : -score;
+    return Evaluator::evaluate(pos);
 }
 
 int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply) noexcept {

@@ -16,6 +16,12 @@
     <ClCompile Include="C:\Users\Dell\Desktop\Programming\Project\Boson\engine\src\debug\BoardPrinter.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="C:\Users\Dell\Desktop\Programming\Project\Boson\engine\src\evaluation\Evaluator.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\Dell\Desktop\Programming\Project\Boson\engine\src\evaluation\PieceSquareTables.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="C:\Users\Dell\Desktop\Programming\Project\Boson\engine\src\fen\FenParser.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>

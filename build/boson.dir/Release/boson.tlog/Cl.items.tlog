@@ -3,6 +3,8 @@ C:\Users\Dell\Desktop\Programming\Project\Boson\engine\src\board\MoveExecutor.cp
 C:\Users\Dell\Desktop\Programming\Project\Boson\engine\src\board\MoveGenerator.cpp;C:\Users\Dell\Desktop\Programming\Project\Boson\build\boson.dir\Release\MoveGenerator.obj
 C:\Users\Dell\Desktop\Programming\Project\Boson\engine\src\board\Position.cpp;C:\Users\Dell\Desktop\Programming\Project\Boson\build\boson.dir\Release\Position.obj
 C:\Users\Dell\Desktop\Programming\Project\Boson\engine\src\debug\BoardPrinter.cpp;C:\Users\Dell\Desktop\Programming\Project\Boson\build\boson.dir\Release\BoardPrinter.obj
+C:\Users\Dell\Desktop\Programming\Project\Boson\engine\src\evaluation\Evaluator.cpp;C:\Users\Dell\Desktop\Programming\Project\Boson\build\boson.dir\Release\Evaluator.obj
+C:\Users\Dell\Desktop\Programming\Project\Boson\engine\src\evaluation\PieceSquareTables.cpp;C:\Users\Dell\Desktop\Programming\Project\Boson\build\boson.dir\Release\PieceSquareTables.obj
 C:\Users\Dell\Desktop\Programming\Project\Boson\engine\src\fen\FenParser.cpp;C:\Users\Dell\Desktop\Programming\Project\Boson\build\boson.dir\Release\FenParser.obj
 C:\Users\Dell\Desktop\Programming\Project\Boson\engine\src\search\Search.cpp;C:\Users\Dell\Desktop\Programming\Project\Boson\build\boson.dir\Release\Search.obj
 C:\Users\Dell\Desktop\Programming\Project\Boson\engine\src\search\TranspositionTable.cpp;C:\Users\Dell\Desktop\Programming\Project\Boson\build\boson.dir\Release\TranspositionTable.obj
