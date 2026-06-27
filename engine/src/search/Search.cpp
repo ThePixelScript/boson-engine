@@ -1,17 +1,14 @@
 #include "search/Search.hpp"
+#include "search/SearchController.hpp"
 #include "search/MoveOrderer.hpp"
 #include "evaluation/Evaluator.hpp"
 #include "board/MoveGenerator.hpp"
 #include "board/MoveExecutor.hpp"
 #include <iostream>
-#include <chrono>
 
 namespace Boson {
 
 TranspositionTable Search::s_tt(16);
-uint64_t Search::m_nodes = 0;
-uint64_t Search::m_qNodes = 0;
-
 std::array<std::array<Move, 2>, 64> Search::s_killerMoves{};
 std::array<std::array<uint32_t, 64>, 12> Search::s_historyTable{};
 
@@ -56,12 +53,19 @@ int Search::evaluate(const Position& pos) noexcept {
 }
 
 int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLine& pv) noexcept {
-    m_nodes++;
+    auto& controller = SearchController::getInstance();
+    auto& stats = controller.getStats();
+
+    stats.nodes++;
     pv.count = 0;
 
-    if (depth == 0) {
-        return quiescence(pos, alpha, beta, ply);
+    // Periodic Check Loop Boundary Rule
+    if (stats.nodes % NODE_CHECK_PERIOD == 0) {
+        controller.checkTime();
     }
+    if (controller.shouldStop()) return 0; // Immediate safe unroll
+
+    if (depth == 0) return quiescence(pos, alpha, beta, ply);
 
     int originalAlpha = alpha;
     Move ttMove;
@@ -70,7 +74,10 @@ int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLi
     TTNodeType ttType;
 
     if (s_tt.probe(pos.getHashKey(), ttScore, ttMove, ttDepth, ttType, alpha, beta)) {
-        if (ttDepth >= depth) return ttScore;
+        if (ttDepth >= depth) {
+            stats.ttHits++;
+            return ttScore;
+        }
     }
 
     MoveList legalMoves;
@@ -95,6 +102,10 @@ int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLi
         
         MoveExecutor::undoMove(pos, legalMoves[i], undo);
 
+        // ABORT GUARD INVARIANT: If the time budget expired during the deep search branch,
+        // we completely discard this frame's score mutations to preserve our previous stable iteration.
+        if (controller.shouldStop()) return 0;
+
         if (score > bestScore) {
             bestScore = score;
             bestMove = legalMoves[i];
@@ -103,7 +114,6 @@ int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLi
         if (score > alpha) {
             alpha = score;
             
-            // Build the Principal Variation Line by prepending the current best move
             pv.moves[0] = legalMoves[i];
             for (size_t j = 0; j < childPv.count; ++j) {
                 if (j + 1 < 64) pv.moves[j + 1] = childPv.moves[j];
@@ -112,6 +122,7 @@ int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLi
         }
 
         if (alpha >= beta) {
+            stats.betaCutoffs++;
             Bitboard targetBit = 1ULL << static_cast<size_t>(legalMoves[i].getToSquare());
             bool isCaptureMove = (pos.getTotalOccupancy() & targetBit) || (legalMoves[i].getToSquare() == pos.getEnPassantSquare() && pos.getEnPassantSquare() != Square::None);
             if (!isCaptureMove && ply < 64) {
@@ -130,6 +141,8 @@ int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLi
         }
     }
 
+    if (controller.shouldStop()) return 0;
+
     TTNodeType storeType = TTNodeType::Exact;
     if (bestScore <= originalAlpha)  storeType = TTNodeType::UpperBound;
     else if (bestScore >= beta)      storeType = TTNodeType::LowerBound;
@@ -139,7 +152,15 @@ int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLi
 }
 
 int Search::quiescence(Position& pos, int alpha, int beta, int ply) noexcept {
-    m_qNodes++;
+    auto& controller = SearchController::getInstance();
+    auto& stats = controller.getStats();
+
+    stats.qNodes++;
+    if (stats.qNodes % NODE_CHECK_PERIOD == 0) {
+        controller.checkTime();
+    }
+    if (controller.shouldStop()) return 0;
+
     int standPat = evaluate(pos);
 
     if (standPat >= beta) return beta;
@@ -158,58 +179,80 @@ int Search::quiescence(Position& pos, int alpha, int beta, int ply) noexcept {
         int score = -quiescence(pos, -beta, -alpha, ply + 1);
         MoveExecutor::undoMove(pos, tacticalMoves[i], undo);
 
+        if (controller.shouldStop()) return 0;
+
         if (score >= beta) return beta;
         if (score > alpha) alpha = score;
     }
+
     return alpha;
 }
 
 int Search::runSearch(Position& pos, int maxDepth) noexcept {
-    m_nodes = 0;
-    m_qNodes = 0;
+    auto& controller = SearchController::getInstance();
+    auto& stats = controller.getStats();
+
     s_tt.clear();
-    
     for (auto& row : s_killerMoves) row.fill(Move());
     for (auto& row : s_historyTable) row.fill(0);
 
-    std::cout << "[BOSON SEARCH] Starting Milestone 6 Tournament Engine Architecture...\n";
-    auto startTime = std::chrono::high_resolution_clock::now();
+    int finalScore = 0;
+    PVLine stablePv;
 
-    int score = 0;
-    PVLine mainPv;
-
-    // Iterative Deepening Loop Framework
     for (int d = 1; d <= maxDepth; ++d) {
-        PVLine iterationPv;
-        score = negamax(pos, d, -INF, INF, 0, iterationPv);
-        
-        if (iterationPv.count > 0) {
-            mainPv = iterationPv;
+        // Soft Limit Verification Check between complete iterations
+        if (controller.getTimeManager().hasTimeLimit()) {
+            if (controller.getElapsedTimeMs() >= controller.getTimeManager().getSoftLimit()) {
+                stats.stopReason = StopReason::SoftTimeLimit;
+                break;
+            }
         }
 
-        auto currentTime = std::chrono::high_resolution_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(currentTime - startTime).count();
-        uint64_t totalNodes = m_nodes + m_qNodes;
-        uint64_t nps = duration > 0 ? (totalNodes * 1000) / duration : totalNodes;
+        PVLine iterationPv;
+        int score = negamax(pos, d, -INF, INF, 0, iterationPv);
+        
+        // If the hard limit abort popped during this depth loop, discard the partial frame
+        if (controller.shouldStop()) {
+            break;
+        }
 
-        // Formal Tournament-Engine Dashboard Output format (Aligns with UCI expectations)
+        // Deepening frame is clean and complete: commit the metrics
+        finalScore = score;
+        stablePv = iterationPv;
+        stats.completedDepth = d;
+        stats.elapsedTimeMs = controller.getElapsedTimeMs();
+
+        uint64_t totalNodes = stats.nodes + stats.qNodes;
+        uint64_t nps = stats.elapsedTimeMs > 0 ? (totalNodes * 1000) / stats.elapsedTimeMs : totalNodes;
+
+// format to the tracking stats line cleanly satisfying strict type narrowing rules
+        std::string currentPvStr = "";
+        for (size_t i = 0; i < stablePv.count; ++i) {
+            int from = static_cast<int>(stablePv.moves[i].getFromSquare());
+            int to = static_cast<int>(stablePv.moves[i].getToSquare());
+            currentPvStr += " " + std::string(1, static_cast<char>('a' + (from % 8))) + 
+                                  std::string(1, static_cast<char>('1' + (from / 8))) +
+                                  std::string(1, static_cast<char>('a' + (to % 8))) + 
+                                  std::string(1, static_cast<char>('1' + (to / 8)));
+        }
+        stats.pvString = currentPvStr;
+
         std::cout << "info depth " << d 
-                  << " score cp " << score 
+                  << " score cp " << finalScore 
                   << " nodes " << totalNodes 
                   << " nps " << nps 
-                  << " time " << duration 
-                  << " pv";
-        
-        for (size_t i = 0; i < mainPv.count; ++i) {
-            int from = static_cast<int>(mainPv.moves[i].getFromSquare());
-            int to = static_cast<int>(mainPv.moves[i].getToSquare());
-            std::cout << " " << static_cast<char>('a' + (from % 8)) << static_cast<char>('1' + (from / 8))
-                      << static_cast<char>('a' + (to % 8)) << static_cast<char>('1' + (to / 8));
-        }
-        std::cout << "\n";
+                  << " time " << stats.elapsedTimeMs 
+                  << " pv" << stats.pvString << "\n";
     }
-    
-    return score;
+
+    if (stats.stopReason == StopReason::None) {
+        stats.stopReason = StopReason::MaxDepthReached;
+    }
+
+    std::cout << "[BOSON CLOCK] Search Complete. Stop Reason Code: " 
+              << static_cast<int>(stats.stopReason) << "\n";
+              
+    return finalScore;
 }
 
 } // namespace Boson

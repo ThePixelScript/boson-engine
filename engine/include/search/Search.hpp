@@ -5,7 +5,6 @@
 #include "board/MoveList.hpp"
 #include "search/TranspositionTable.hpp"
 #include <array>
-#include <vector>
 
 namespace Boson {
 
@@ -19,7 +18,7 @@ public:
     static uint64_t perft(Position& pos, int depth) noexcept;
     static void divide(Position& pos, int depth) noexcept;
     
-    // Core Driver for Milestone 6: Iterative Deepening
+    // Updated signature cleanly isolated from explicit depth numbers
     static int runSearch(Position& pos, int maxDepth) noexcept;
 
 private:
@@ -28,14 +27,12 @@ private:
     static int evaluate(const Position& pos) noexcept;
 
     static TranspositionTable s_tt;
-    static uint64_t m_nodes;
-    static uint64_t m_qNodes;
-
     static std::array<std::array<Move, 2>, 64> s_killerMoves;
     static std::array<std::array<uint32_t, 64>, 12> s_historyTable;
 
     static constexpr int INF = 32000;
     static constexpr int MATE = 31000;
+    static constexpr uint64_t NODE_CHECK_PERIOD = 2048; // Query period bounds
 };
 
 } // namespace Boson
