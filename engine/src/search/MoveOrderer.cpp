@@ -1,4 +1,5 @@
 #include "search/MoveOrderer.hpp"
+#include "search/see/SEE.hpp"
 #include <algorithm>
 
 namespace Boson {
@@ -70,7 +71,19 @@ void MoveOrderer::scoreAndSortMoves(
             if (victim != Piece::None) {
                 int aIdx = getPieceIndex(attacker);
                 int vIdx = getPieceIndex(victim);
-                score = SCORE_CAPTURES + MVV_LVA[aIdx][vIdx];
+                int mvvLvaScore = SCORE_CAPTURES + MVV_LVA[aIdx][vIdx];
+
+                // Module 6.5 Integration: Evaluate tactical safety using SEE
+                // We cast const away safely since SEE works on a local copy of occupancy bitboards
+                int seeValue = SEE::evaluate(const_cast<Position&>(pos), m.getFromSquare(), m.getToSquare());
+
+                if (seeValue < 0) {
+                    // It's a losing capture trap! Demote it drastically so it's searched AFTER good quiet moves
+                    score = SCORE_QUIET - 10000 + seeValue;
+                } else {
+                    // Safe or winning capture, maintain high MVV-LVA sort priority
+                    score = mvvLvaScore;
+                }
             }
             // Fallback checking for promotions based on pawn destination ranks
             else if ((attacker == Piece::WhitePawn && m.getToSquare() >= Square::A8 && m.getToSquare() <= Square::H8) ||

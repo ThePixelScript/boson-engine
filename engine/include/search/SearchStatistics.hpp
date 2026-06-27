@@ -24,6 +24,12 @@ struct SearchStatistics {
     std::string pvString = "";
     StopReason stopReason = StopReason::None;
 
+    // Module 6.4: Aspiration Tuning Counters
+    uint32_t aspirationSuccesses = 0;
+    uint32_t failHighs = 0;
+    uint32_t failLows = 0;
+    uint32_t researchCount = 0;
+
     void reset() noexcept {
         nodes = 0;
         qNodes = 0;
@@ -33,6 +39,10 @@ struct SearchStatistics {
         completedDepth = 0;
         pvString = "";
         stopReason = StopReason::None;
+        aspirationSuccesses = 0;
+        failHighs = 0;
+        failLows = 0;
+        researchCount = 0;
     }
 };
 

@@ -37,6 +37,9 @@
     <ClCompile Include="C:\Users\Dell\Desktop\Programming\Project\Boson\engine\src\search\Zobrist.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="C:\Users\Dell\Desktop\Programming\Project\Boson\engine\src\search\see\SEE.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <CustomBuild Include="C:\Users\Dell\Desktop\Programming\Project\Boson\engine\CMakeLists.txt" />

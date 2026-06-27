@@ -10,3 +10,4 @@ C:\Users\Dell\Desktop\Programming\Project\Boson\engine\src\search\MoveOrderer.cp
 C:\Users\Dell\Desktop\Programming\Project\Boson\engine\src\search\Search.cpp;C:\Users\Dell\Desktop\Programming\Project\Boson\build\boson.dir\Release\Search.obj
 C:\Users\Dell\Desktop\Programming\Project\Boson\engine\src\search\TranspositionTable.cpp;C:\Users\Dell\Desktop\Programming\Project\Boson\build\boson.dir\Release\TranspositionTable.obj
 C:\Users\Dell\Desktop\Programming\Project\Boson\engine\src\search\Zobrist.cpp;C:\Users\Dell\Desktop\Programming\Project\Boson\build\boson.dir\Release\Zobrist.obj
+C:\Users\Dell\Desktop\Programming\Project\Boson\engine\src\search\see\SEE.cpp;C:\Users\Dell\Desktop\Programming\Project\Boson\build\boson.dir\Release\SEE.obj

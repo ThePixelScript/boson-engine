@@ -28,3 +28,17 @@
 | 5     | +5         | 21,044      | 10        | 2.10M   | `b1c3 b8c6 g1h3 g8f6 h3f4` |
 | 6     | 0          | 63,382      | 42        | 1.50M   | `b1c3 b8c6 g1f3 g8f6 a1b1 a8b8` |
 | 7     | 0          | 347,413     | 124       | 2.80M   | `b1c3 g8f6 g1f3 b8c6`   |
+
+## Aspiration Windows Framework Integration
+* **Date:** June 2026
+* **Base Window Delta ($\delta$):** 30 cp
+* **Activation Target:** Depth $\ge$ 5
+
+### Aspiration Narrowing Test (FEN: Startpos, Depth 6)
+* **Window Successes:** 2
+* **Window Failures:** 0 (High: 0, Low: 0)
+
+| Depth | Score (cp) | Total Nodes | Time (ms) | NPS | Principal Variation (PV) |
+| :---: | :--------: | :---------: | :-------: | :-----: | :---------------------- |
+| 5     | +5         | 19,674      | 16        | 1.22M   | `b1c3 b8c6 g1h3 g8f6 h3f4` |
+| 6     | 0          | 61,077      | 81        | 754K    | `b1c3 b8c6 g1f3 g8f6 a1b1 a8b8` |

@@ -196,11 +196,16 @@ int Search::runSearch(Position& pos, int maxDepth) noexcept {
     for (auto& row : s_killerMoves) row.fill(Move());
     for (auto& row : s_historyTable) row.fill(0);
 
-    int finalScore = 0;
+    std::cout << "[BOSON SEARCH] Running Ordered Alpha-Beta + Aspiration Framework...\n";
+
+    int lastScore = 0;
     PVLine stablePv;
+    
+    // Configurable base window delta width (30 centipawns)
+    int delta = 30;
 
     for (int d = 1; d <= maxDepth; ++d) {
-        // Soft Limit Verification Check between complete iterations
+        // Soft Limit Verification between complete iterations
         if (controller.getTimeManager().hasTimeLimit()) {
             if (controller.getElapsedTimeMs() >= controller.getTimeManager().getSoftLimit()) {
                 stats.stopReason = StopReason::SoftTimeLimit;
@@ -208,16 +213,72 @@ int Search::runSearch(Position& pos, int maxDepth) noexcept {
             }
         }
 
+        int score = 0;
         PVLine iterationPv;
-        int score = negamax(pos, d, -INF, INF, 0, iterationPv);
         
-        // If the hard limit abort popped during this depth loop, discard the partial frame
+        // Apply Aspiration Windows starting at Depth 5 (once history settles)
+        if (d >= 5) {
+            int alphaWindow = lastScore - delta;
+            int betaWindow = lastScore + delta;
+            int researchAttemptsAtThisDepth = 0;
+
+            while (true) {
+                // Safeguard against unbounded hanging re-searches if a hard time limit hits
+                if (controller.getTimeManager().hasTimeLimit()) {
+                    controller.checkTime();
+                    if (controller.shouldStop()) break;
+                }
+
+                score = negamax(pos, d, alphaWindow, betaWindow, 0, iterationPv);
+                
+                if (controller.shouldStop()) break;
+
+                // Case A: Fail Low (Score is less than or equal to alpha window)
+                if (score <= alphaWindow) {
+                    stats.failLows++;
+                    stats.researchCount++;
+                    researchAttemptsAtThisDepth++;
+                    
+                    betaWindow = (alphaWindow + betaWindow) / 2; // Tighten beta over the new lower search
+                    alphaWindow = lastScore - (delta * (1 << researchAttemptsAtThisDepth));
+                    
+                    if (alphaWindow <= -INF) alphaWindow = -INF;
+                }
+                // Case B: Fail High (Score is greater than or equal to beta window)
+                else if (score >= betaWindow) {
+                    stats.failHighs++;
+                    stats.researchCount++;
+                    researchAttemptsAtThisDepth++;
+                    
+                    alphaWindow = (alphaWindow + betaWindow) / 2; // Tighten alpha over the new upper search
+                    betaWindow = lastScore + (delta * (1 << researchAttemptsAtThisDepth));
+                    
+                    if (betaWindow >= INF) betaWindow = INF;
+                }
+                // Case C: Success (Score lands cleanly inside window bounds)
+                else {
+                    stats.aspirationSuccesses++;
+                    break;
+                }
+
+                // Safety fallback: if we've widened windows repeatedly without resolving, broaden to infinity
+                if (researchAttemptsAtThisDepth >= 4) {
+                    alphaWindow = -INF;
+                    betaWindow = INF;
+                }
+            }
+        } else {
+            // Shallow baseline searches run with standard infinite windows
+            score = negamax(pos, d, -INF, INF, 0, iterationPv);
+        }
+
+        // If the search was aborted mid-iteration by the time controller, discard it
         if (controller.shouldStop()) {
             break;
         }
 
-        // Deepening frame is clean and complete: commit the metrics
-        finalScore = score;
+        // Deepening frame completed successfully: commit updates
+        lastScore = score;
         stablePv = iterationPv;
         stats.completedDepth = d;
         stats.elapsedTimeMs = controller.getElapsedTimeMs();
@@ -225,7 +286,6 @@ int Search::runSearch(Position& pos, int maxDepth) noexcept {
         uint64_t totalNodes = stats.nodes + stats.qNodes;
         uint64_t nps = stats.elapsedTimeMs > 0 ? (totalNodes * 1000) / stats.elapsedTimeMs : totalNodes;
 
-// format to the tracking stats line cleanly satisfying strict type narrowing rules
         std::string currentPvStr = "";
         for (size_t i = 0; i < stablePv.count; ++i) {
             int from = static_cast<int>(stablePv.moves[i].getFromSquare());
@@ -238,7 +298,7 @@ int Search::runSearch(Position& pos, int maxDepth) noexcept {
         stats.pvString = currentPvStr;
 
         std::cout << "info depth " << d 
-                  << " score cp " << finalScore 
+                  << " score cp " << lastScore 
                   << " nodes " << totalNodes 
                   << " nps " << nps 
                   << " time " << stats.elapsedTimeMs 
@@ -249,10 +309,14 @@ int Search::runSearch(Position& pos, int maxDepth) noexcept {
         stats.stopReason = StopReason::MaxDepthReached;
     }
 
-    std::cout << "[BOSON CLOCK] Search Complete. Stop Reason Code: " 
-              << static_cast<int>(stats.stopReason) << "\n";
+    std::cout << "\n--- Aspiration Optimization Analytics ---\n";
+    std::cout << "  -> Total Window Successes : " << stats.aspirationSuccesses << "\n";
+    std::cout << "  -> Window Fail Highs       : " << stats.failHighs << "\n";
+    std::cout << "  -> Window Fail Lows        : " << stats.failLows << "\n";
+    std::cout << "  -> Total Re-Searches Hit   : " << stats.researchCount << "\n";
+    std::cout << "[BOSON CLOCK] Search Complete. Stop Reason Code: " << static_cast<int>(stats.stopReason) << "\n";
               
-    return finalScore;
+    return lastScore;
 }
 
 } // namespace Boson
