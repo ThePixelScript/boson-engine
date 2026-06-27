@@ -17,12 +17,17 @@ public:
         }
     }
 
+    // Mutable indexing operator for in-place reordering (Phase AA requirement)
+    constexpr Move& operator[](size_t index) noexcept { return m_storage[index]; }
+    
+    // Read-only indexing operator
     constexpr const Move& operator[](size_t index) const noexcept { return m_storage[index]; }
+    
     constexpr size_t size() const noexcept { return m_count; }
     constexpr void clear() noexcept { m_count = 0; }
 
 private:
-    std::array<Move, 256> m_storage; // 256 moves handles any valid chess configuration easily
+    std::array<Move, 256> m_storage;
     size_t m_count;
 };
 

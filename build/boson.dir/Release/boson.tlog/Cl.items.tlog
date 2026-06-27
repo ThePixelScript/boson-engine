@@ -6,6 +6,7 @@ C:\Users\Dell\Desktop\Programming\Project\Boson\engine\src\debug\BoardPrinter.cp
 C:\Users\Dell\Desktop\Programming\Project\Boson\engine\src\evaluation\Evaluator.cpp;C:\Users\Dell\Desktop\Programming\Project\Boson\build\boson.dir\Release\Evaluator.obj
 C:\Users\Dell\Desktop\Programming\Project\Boson\engine\src\evaluation\PieceSquareTables.cpp;C:\Users\Dell\Desktop\Programming\Project\Boson\build\boson.dir\Release\PieceSquareTables.obj
 C:\Users\Dell\Desktop\Programming\Project\Boson\engine\src\fen\FenParser.cpp;C:\Users\Dell\Desktop\Programming\Project\Boson\build\boson.dir\Release\FenParser.obj
+C:\Users\Dell\Desktop\Programming\Project\Boson\engine\src\search\MoveOrderer.cpp;C:\Users\Dell\Desktop\Programming\Project\Boson\build\boson.dir\Release\MoveOrderer.obj
 C:\Users\Dell\Desktop\Programming\Project\Boson\engine\src\search\Search.cpp;C:\Users\Dell\Desktop\Programming\Project\Boson\build\boson.dir\Release\Search.obj
 C:\Users\Dell\Desktop\Programming\Project\Boson\engine\src\search\TranspositionTable.cpp;C:\Users\Dell\Desktop\Programming\Project\Boson\build\boson.dir\Release\TranspositionTable.obj
 C:\Users\Dell\Desktop\Programming\Project\Boson\engine\src\search\Zobrist.cpp;C:\Users\Dell\Desktop\Programming\Project\Boson\build\boson.dir\Release\Zobrist.obj

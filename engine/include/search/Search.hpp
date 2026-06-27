@@ -4,6 +4,7 @@
 #include "board/Position.hpp"
 #include "board/MoveList.hpp"
 #include "search/TranspositionTable.hpp"
+#include <array>
 
 namespace Boson {
 
@@ -19,6 +20,10 @@ private:
 
     static TranspositionTable s_tt;
     static uint64_t m_nodes;
+
+    // Phase AA Data Ownership boundaries
+    static std::array<std::array<Move, 2>, 64> s_killerMoves;
+    static std::array<std::array<uint32_t, 64>, 12> s_historyTable;
 
     static constexpr int INF = 32000;
     static constexpr int MATE = 31000;
