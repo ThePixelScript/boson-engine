@@ -434,4 +434,22 @@ void MoveGenerator::generateLegalMoves(Position& pos, MoveList& legalMoves) noex
     }
 }
 
+void MoveGenerator::generateTacticalMoves(Position& pos, MoveList& moves) noexcept {
+    MoveList allMoves;
+    generateLegalMoves(pos, allMoves);
+
+    // Filter only tactical interactions: Normal captures and En Passant captures
+    for (size_t i = 0; i < allMoves.size(); ++i) {
+        const Move& m = allMoves[i];
+        
+        Bitboard targetBit = 1ULL << static_cast<size_t>(m.getToSquare());
+        bool isNormalCapture = (pos.getTotalOccupancy() & targetBit) != 0;
+        bool isEnPassantCapture = (m.getToSquare() == pos.getEnPassantSquare() && pos.getEnPassantSquare() != Square::None);
+
+        if (isNormalCapture || isEnPassantCapture) {
+            moves.push_back(m);
+        }
+    }
+}
+
 } // namespace Boson

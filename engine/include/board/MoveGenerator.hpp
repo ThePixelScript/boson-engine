@@ -27,6 +27,7 @@ public:
     static bool isSquareAttacked(const Position& pos, Square sq, Color attacker) noexcept;
     static bool inCheck(const Position& pos, Color side) noexcept;
     static void generateLegalMoves(Position& pos, MoveList& legalMoves) noexcept;
+    static void generateTacticalMoves(Position& pos, MoveList& moves) noexcept;
 
 private:
     static std::array<Bitboard, 64> s_knightAttacks;

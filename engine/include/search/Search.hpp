@@ -16,12 +16,13 @@ public:
 
 private:
     static int negamax(Position& pos, int depth, int alpha, int beta, int ply) noexcept;
+    static int quiescence(Position& pos, int alpha, int beta, int ply) noexcept; // Phase AB
     static int evaluate(const Position& pos) noexcept;
 
     static TranspositionTable s_tt;
     static uint64_t m_nodes;
+    static uint64_t m_qNodes; // Instrumentation metric for tactical leaf checks
 
-    // Phase AA Data Ownership boundaries
     static std::array<std::array<Move, 2>, 64> s_killerMoves;
     static std::array<std::array<uint32_t, 64>, 12> s_historyTable;
 

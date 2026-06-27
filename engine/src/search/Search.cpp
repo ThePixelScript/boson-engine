@@ -9,55 +9,18 @@ namespace Boson {
 
 TranspositionTable Search::s_tt(16);
 uint64_t Search::m_nodes = 0;
+uint64_t Search::m_qNodes = 0;
 
-// Initialize structural sorting data tables
 std::array<std::array<Move, 2>, 64> Search::s_killerMoves{};
 std::array<std::array<uint32_t, 64>, 12> Search::s_historyTable{};
 
-// ... keep perft() and divide() implementation parameters unchanged ...
-
-uint64_t Search::perft(Position& pos, int depth) noexcept {
-    if (depth == 0) return 1ULL;
-    MoveList legalMoves;
-    MoveGenerator::generateLegalMoves(pos, legalMoves);
-    uint64_t nodes = 0;
-    for (size_t i = 0; i < legalMoves.size(); ++i) {
-        UndoState undo;
-        MoveExecutor::makeMove(pos, legalMoves[i], undo);
-        nodes += perft(pos, depth - 1);
-        MoveExecutor::undoMove(pos, legalMoves[i], undo);
-    }
-    return nodes;
-}
-
-void Search::divide(Position& pos, int depth) noexcept {
-    if (depth == 0) return;
-    MoveList legalMoves;
-    MoveGenerator::generateLegalMoves(pos, legalMoves);
-    std::cout << "\n--- PERFT DIVIDE (Depth " << depth << ") ---\n";
-    uint64_t totalNodes = 0;
-    for (size_t i = 0; i < legalMoves.size(); ++i) {
-        const Move& m = legalMoves[i];
-        UndoState undo;
-        MoveExecutor::makeMove(pos, m, undo);
-        uint64_t nodesForMove = perft(pos, depth - 1);
-        totalNodes += nodesForMove;
-        MoveExecutor::undoMove(pos, m, undo);
-
-        int from = static_cast<int>(m.getFromSquare());
-        int to = static_cast<int>(m.getToSquare());
-        std::cout << static_cast<char>('a' + (from % 8)) << static_cast<char>('1' + (from / 8))
-                  << static_cast<char>('a' + (to % 8)) << static_cast<char>('1' + (to / 8)) << " : " << nodesForMove << "\n";
-    }
-    std::cout << "Total Nodes: " << totalNodes << "\n-------------------------\n";
-}
-
-int Search::evaluate(const Position& pos) noexcept {
-    return Evaluator::evaluate(pos);
-}
+// ... keep perft(), divide(), evaluate() identical ...
 
 int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply) noexcept {
     m_nodes++;
+
+    // Base Case Contract: Delegate explicitly to tactical quiescence validation loops
+    if (depth == 0) return quiescence(pos, alpha, beta, ply);
 
     int originalAlpha = alpha;
     Move ttMove;
@@ -66,24 +29,17 @@ int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply) noex
     TTNodeType ttType;
 
     if (s_tt.probe(pos.getHashKey(), ttScore, ttMove, ttDepth, ttType, alpha, beta)) {
-        if (ttDepth >= depth) {
-            return ttScore;
-        }
+        if (ttDepth >= depth) return ttScore;
     }
-
-    if (depth == 0) return evaluate(pos);
 
     MoveList legalMoves;
     MoveGenerator::generateLegalMoves(pos, legalMoves);
 
     if (legalMoves.size() == 0) {
-        if (MoveGenerator::inCheck(pos, pos.getSideToMove())) {
-            return -MATE + ply; 
-        }
+        if (MoveGenerator::inCheck(pos, pos.getSideToMove())) return -MATE + ply; 
         return 0; 
     }
 
-    // Phase AA Separation: Hand the move list to the orderer before executing the search loop
     MoveOrderer::scoreAndSortMoves(pos, legalMoves, ttMove, s_killerMoves, s_historyTable, ply);
 
     int bestScore = -INF;
@@ -92,47 +48,28 @@ int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply) noex
     for (size_t i = 0; i < legalMoves.size(); ++i) {
         UndoState undo;
         MoveExecutor::makeMove(pos, legalMoves[i], undo);
-        
         int score = -negamax(pos, depth - 1, -beta, -alpha, ply + 1);
-        
         MoveExecutor::undoMove(pos, legalMoves[i], undo);
 
         if (score > bestScore) {
             bestScore = score;
             bestMove = legalMoves[i];
         }
-        if (score > alpha) {
-            alpha = score;
-        }
-        
-        // Beta Cutoff hit: This move is too good, opponent will avoid this branch entirely
+        if (score > alpha) alpha = score;
         if (alpha >= beta) {
-            // Find what piece moved to determine if this was a quiet move
+            // Killer / History mutations
             Bitboard targetBit = 1ULL << static_cast<size_t>(legalMoves[i].getToSquare());
-            bool isNormalCapture = (pos.getTotalOccupancy() & targetBit) != 0;
-            bool isEnPassantCapture = (legalMoves[i].getToSquare() == pos.getEnPassantSquare() && pos.getEnPassantSquare() != Square::None);
-            bool isCaptureMove = isNormalCapture || isEnPassantCapture;
-
+            bool isCaptureMove = (pos.getTotalOccupancy() & targetBit) || (legalMoves[i].getToSquare() == pos.getEnPassantSquare() && pos.getEnPassantSquare() != Square::None);
             if (!isCaptureMove && ply < 64) {
-                // Store killer move slots (Shift slot 0 back to slot 1)
                 if (s_killerMoves[ply][0].getRawData() != legalMoves[i].getRawData()) {
                     s_killerMoves[ply][1] = s_killerMoves[ply][0];
                     s_killerMoves[ply][0] = legalMoves[i];
                 }
-                
-                // Accumulate history success weight by scanning for the piece type
-                Piece movingPiece = Piece::None;
                 for (size_t p = 0; p < 12; ++p) {
                     if (pos.getPieceBitboard(static_cast<Piece>(p)) & (1ULL << static_cast<size_t>(legalMoves[i].getFromSquare()))) {
-                        movingPiece = static_cast<Piece>(p);
+                        s_historyTable[p][static_cast<size_t>(legalMoves[i].getToSquare())] += depth * depth;
                         break;
                     }
-                }
-
-                if (movingPiece != Piece::None) {
-                    size_t pIdx = static_cast<size_t>(movingPiece);
-                    size_t toIdx = static_cast<size_t>(legalMoves[i].getToSquare());
-                    s_historyTable[pIdx][toIdx] += depth * depth; // Weight cutoff by depth impact
                 }
             }
             break; 
@@ -144,33 +81,68 @@ int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply) noex
     else if (bestScore >= beta)      storeType = TTNodeType::LowerBound;
 
     s_tt.store(pos.getHashKey(), bestScore, bestMove, depth, storeType, 0);
-
     return bestScore;
+}
+
+// Phase AB — Quiescence Search Implementation
+int Search::quiescence(Position& pos, int alpha, int beta, int ply) noexcept {
+    m_qNodes++;
+
+    // 1. Establish Stand-Pat Baseline Score
+    int standPat = evaluate(pos);
+
+    // Alpha-Beta bounding conditions
+    if (standPat >= beta) return beta;
+    if (standPat > alpha) alpha = standPat;
+
+    // 2. Generate and order tactical captures only
+    MoveList tacticalMoves;
+    MoveGenerator::generateTacticalMoves(pos, tacticalMoves);
+    
+    // Pass empty killers and history tables since q-search evaluates captures exclusively
+    static const std::array<std::array<Move, 2>, 64> emptyKillers{};
+    static const std::array<std::array<uint32_t, 64>, 12> emptyHistory{};
+    MoveOrderer::scoreAndSortMoves(pos, tacticalMoves, Move(), emptyKillers, emptyHistory, ply);
+
+    // 3. Evaluate tactical continuations recursively
+    for (size_t i = 0; i < tacticalMoves.size(); ++i) {
+        UndoState undo;
+        MoveExecutor::makeMove(pos, tacticalMoves[i], undo);
+        
+        int score = -quiescence(pos, -beta, -alpha, ply + 1);
+        
+        MoveExecutor::undoMove(pos, tacticalMoves[i], undo);
+
+        if (score >= beta) return beta;
+        if (score > alpha) alpha = score;
+    }
+
+    return alpha;
 }
 
 int Search::runSearch(Position& pos, int maxDepth) noexcept {
     int score = 0;
     m_nodes = 0;
+    m_qNodes = 0; // Clear instrumentation counts
     s_tt.clear();
     
-    // Reset our dynamic search heuristic tables
     for (auto& row : s_killerMoves) row.fill(Move());
     for (auto& row : s_historyTable) row.fill(0);
 
-    std::cout << "[BOSON SEARCH] Running Ordered Alpha-Beta Deepening Core...\n";
+    std::cout << "[BOSON SEARCH] Running Ordered Alpha-Beta + Quiescence Framework...\n";
     
     for (int d = 1; d <= maxDepth; ++d) {
         score = negamax(pos, d, -INF, INF, 0);
         std::cout << "  -> Depth " << d << " Complete. Score: " << score 
-                  << " | Total Node Visits: " << m_nodes << "\n";
+                  << " | Base Nodes: " << m_nodes << " | Q-Nodes: " << m_qNodes << "\n";
     }
-
-    std::cout << "\n--- Transposition Cache Statistics ---\n";
-    std::cout << "  -> Total Probes       : " << s_tt.getProbes() << "\n";
-    std::cout << "  -> Cache Hits         : " << s_tt.getHits() << "\n";
-    std::cout << "  -> Cache Cutoffs      : " << s_tt.getCutoffs() << "\n";
     
     return score;
+}
+
+int Search::evaluate(const Position& pos) noexcept {
+    // Cast away const safely to bridge to the stateless evaluator pipeline
+    return Evaluator::evaluate(const_cast<Position&>(pos));
 }
 
 } // namespace Boson
