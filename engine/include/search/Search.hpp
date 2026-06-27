@@ -5,23 +5,31 @@
 #include "board/MoveList.hpp"
 #include "search/TranspositionTable.hpp"
 #include <array>
+#include <vector>
 
 namespace Boson {
+
+struct PVLine {
+    size_t count = 0;
+    std::array<Move, 64> moves{};
+};
 
 class Search {
 public:
     static uint64_t perft(Position& pos, int depth) noexcept;
     static void divide(Position& pos, int depth) noexcept;
+    
+    // Core Driver for Milestone 6: Iterative Deepening
     static int runSearch(Position& pos, int maxDepth) noexcept;
 
 private:
-    static int negamax(Position& pos, int depth, int alpha, int beta, int ply) noexcept;
-    static int quiescence(Position& pos, int alpha, int beta, int ply) noexcept; // Phase AB
+    static int negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLine& pv) noexcept;
+    static int quiescence(Position& pos, int alpha, int beta, int ply) noexcept;
     static int evaluate(const Position& pos) noexcept;
 
     static TranspositionTable s_tt;
     static uint64_t m_nodes;
-    static uint64_t m_qNodes; // Instrumentation metric for tactical leaf checks
+    static uint64_t m_qNodes;
 
     static std::array<std::array<Move, 2>, 64> s_killerMoves;
     static std::array<std::array<uint32_t, 64>, 12> s_historyTable;
