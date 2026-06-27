@@ -15,10 +15,10 @@ enum class TTNodeType : uint8_t {
 
 struct TTEntry {
     uint64_t key;
-    int score;
     Move bestMove;
-    int depth;
-    TTNodeType type;
+    int16_t score;
+    int16_t depth;
+    uint8_t flag; // 0 = Exact, 1 = Lower Bound, 2 = Upper Bound
     uint8_t generation;
 };
 
@@ -30,9 +30,22 @@ public:
     void store(uint64_t key, int score, Move bestMove, int depth, TTNodeType type, uint8_t generation) noexcept;
     bool probe(uint64_t key, int& score, Move& bestMove, int& depth, TTNodeType& type, int alpha, int beta) noexcept;
 
+    // Instrumentation Metrics
+    uint64_t getProbes() const noexcept { return m_probes; }
+    uint64_t getHits() const noexcept { return m_hits; }
+    uint64_t getCollisions() const noexcept { return m_collisions; }
+    uint64_t getCutoffs() const noexcept { return m_cutoffs; }
+
 private:
     std::vector<TTEntry> m_table;
     size_t m_entryCount;
+    size_t m_mask;
+
+    // Diagnostic Counters
+    uint64_t m_probes = 0;
+    uint64_t m_hits = 0;
+    uint64_t m_collisions = 0;
+    uint64_t m_cutoffs = 0;
 };
 
 } // namespace Boson
