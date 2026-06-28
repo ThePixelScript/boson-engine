@@ -42,3 +42,22 @@
 | :---: | :--------: | :---------: | :-------: | :-----: | :---------------------- |
 | 5     | +5         | 19,674      | 16        | 1.22M   | `b1c3 b8c6 g1h3 g8f6 h3f4` |
 | 6     | 0          | 61,077      | 81        | 754K    | `b1c3 b8c6 g1f3 g8f6 a1b1 a8b8` |
+
+## Null Move Pruning Integration
+* **Date:** June 2026
+* **Reduction Constant ($R$):** 2
+* **Verification Target:** FEN: Startpos, Depth 6
+
+### 🚀 Engine Optimization Progression History
+
+| Milestone Phase | Score | Total Nodes | Time (ms) | NPS | Principal Variation (PV) |
+| :--- | :---: | :---: | :---: | :---: | :--- |
+| **Baseline Core** | `0` | 63,382 | 42 | 1.50M | `b1c3 b8c6 g1f3 g8f6 a1b1 a8b8` |
+| **Aspiration Windows** | `0` | 61,077 | 81 | 754K  | `b1c3 b8c6 g1f3 g8f6 a1b1 a8b8` |
+| **Null Move Pruning** | `0` | **35,725** | 38 | 940K  | `b1c3 b8c6 g1f3 g8f6 a1b1 a8b8` |
+
+### Null Move Performance Telemetry
+* **Null Move Attempts:** 218
+* **Null Move Cutoffs:** 120
+* **Null Move Failures:** 98
+* **Zugzwang Triggers:** 0 (Initial array contains full non-pawn material)

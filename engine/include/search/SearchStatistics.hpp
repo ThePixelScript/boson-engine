@@ -30,6 +30,12 @@ struct SearchStatistics {
     uint32_t failLows = 0;
     uint32_t researchCount = 0;
 
+    // Module 6.6: Null Move Pruning Telemetry
+    uint64_t nullAttempts = 0;
+    uint64_t nullCutoffs = 0;
+    uint64_t nullFailures = 0;
+    uint64_t nullDisabled = 0;
+
     void reset() noexcept {
         nodes = 0;
         qNodes = 0;
@@ -43,6 +49,10 @@ struct SearchStatistics {
         failHighs = 0;
         failLows = 0;
         researchCount = 0;
+        nullAttempts = 0;
+        nullCutoffs = 0;
+        nullFailures = 0;
+        nullDisabled = 0;
     }
 };
 

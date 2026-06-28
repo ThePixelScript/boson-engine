@@ -2,41 +2,34 @@
 #include "fen/FenParser.hpp"
 #include "search/Zobrist.hpp"
 #include "board/MoveGenerator.hpp"
-#include "search/see/SEE.hpp"
+#include "search/SearchLimits.hpp"
+#include "search/SearchController.hpp"
+#include "search/Search.hpp"
 
 int main() {
     std::ios_base::sync_with_stdio(false);
     std::cin.tie(nullptr);
 
-    std::cout << "[BOSON MAIN] Running Milestone 6 — Module 6.5 SEE Tactical Diagnostics\n";
+    std::cout << "[BOSON MAIN] Running Milestone 6 — Null Move Pruning Integration\n";
     Boson::Zobrist::initialize();
     Boson::MoveGenerator::initializeTables();
 
-    // =========================================================================
-    // TEST CASE 1: Profitable Trade (The Classical Open-File Exchange)
-    // Position FEN: White Rook on d1, White Rook on d2. Black Rook on d8.
-    // White d2 Rook captures Black d8 Rook. 
-    // Sequence: RxR (+500), RxR (-500), RxR (+500). Net Result = +500 (Gain a Rook)
-    // =========================================================================
-    auto profitableFen = Boson::FenParser::parse("3r4/8/8/8/8/8/3R4/3R4 w - - 0 1");
-    int scoreGood = Boson::SEE::evaluate(*profitableFen, Boson::Square::D2, Boson::Square::D8);
-    std::cout << "  -> Open File Rook Trade SEE Value: " << scoreGood << " (Expected: 500)\n";
+    auto pos = Boson::FenParser::parse("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
 
-    // =========================================================================
-    // TEST CASE 2: Hanging Queen Trap
-    // White Queen on d1 captures Black Pawn on d5. Black Knight on c6 protects d5.
-    // Sequence: QxP (+100), NxQ (-900). Net Result = -800
-    // =========================================================================
-    auto trapFen = Boson::FenParser::parse("r1bqkbnr/ppp1pppp/2n5/3p4/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
-    int scoreBad = Boson::SEE::evaluate(*trapFen, Boson::Square::D1, Boson::Square::D5);
-    std::cout << "  -> Hanging Queen Trap SEE Value:   " << scoreBad << " (Expected: -800)\n";
+    // Setup standard 2000ms base pool with a 50ms increment per move
+    Boson::SearchLimits limits;
+    limits.wtime = 2000;
+    limits.winc = 50;
+    limits.depth = 6; // Profile up to Depth 6
 
-    if (scoreGood == 500 && scoreBad == -800) {
-        std::cout << "\n[BOSON TEST] STATUS: MODULE 6.5 SEE SIMULATOR PASSED TACTICAL VALIDATION.\n";
-    } else {
-        std::cerr << "\n[BOSON TEST] CRITICAL FAILURE: SEE calculations are out of alignment!\n";
-        return 1;
-    }
+    auto& controller = Boson::SearchController::getInstance();
+    controller.initSearch(limits, *pos);
+
+    std::cout << "[BOSON] Soft Search Budget Allocated: " << controller.getTimeManager().getSoftLimit() << "ms\n";
+    std::cout << "[BOSON] Hard Search Budget Cutoff:    " << controller.getTimeManager().getHardLimit() << "ms\n\n";
+
+    // Launch the core search driver
+    Boson::Search::runSearch(*pos, limits.depth);
 
     return 0;
 }

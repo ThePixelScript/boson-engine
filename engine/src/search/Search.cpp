@@ -1,10 +1,12 @@
 #include "search/Search.hpp"
 #include "search/SearchController.hpp"
 #include "search/MoveOrderer.hpp"
+#include "search/see/SEE.hpp"
 #include "evaluation/Evaluator.hpp"
 #include "board/MoveGenerator.hpp"
 #include "board/MoveExecutor.hpp"
 #include <iostream>
+#include <algorithm>
 
 namespace Boson {
 
@@ -52,105 +54,6 @@ int Search::evaluate(const Position& pos) noexcept {
     return Evaluator::evaluate(const_cast<Position&>(pos));
 }
 
-int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLine& pv) noexcept {
-    auto& controller = SearchController::getInstance();
-    auto& stats = controller.getStats();
-
-    stats.nodes++;
-    pv.count = 0;
-
-    // Periodic Check Loop Boundary Rule
-    if (stats.nodes % NODE_CHECK_PERIOD == 0) {
-        controller.checkTime();
-    }
-    if (controller.shouldStop()) return 0; // Immediate safe unroll
-
-    if (depth == 0) return quiescence(pos, alpha, beta, ply);
-
-    int originalAlpha = alpha;
-    Move ttMove;
-    int ttScore = 0;
-    int ttDepth = 0;
-    TTNodeType ttType;
-
-    if (s_tt.probe(pos.getHashKey(), ttScore, ttMove, ttDepth, ttType, alpha, beta)) {
-        if (ttDepth >= depth) {
-            stats.ttHits++;
-            return ttScore;
-        }
-    }
-
-    MoveList legalMoves;
-    MoveGenerator::generateLegalMoves(pos, legalMoves);
-
-    if (legalMoves.size() == 0) {
-        if (MoveGenerator::inCheck(pos, pos.getSideToMove())) return -MATE + ply; 
-        return 0; 
-    }
-
-    MoveOrderer::scoreAndSortMoves(pos, legalMoves, ttMove, s_killerMoves, s_historyTable, ply);
-
-    int bestScore = -INF;
-    Move bestMove;
-    PVLine childPv;
-
-    for (size_t i = 0; i < legalMoves.size(); ++i) {
-        UndoState undo;
-        MoveExecutor::makeMove(pos, legalMoves[i], undo);
-        
-        int score = -negamax(pos, depth - 1, -beta, -alpha, ply + 1, childPv);
-        
-        MoveExecutor::undoMove(pos, legalMoves[i], undo);
-
-        // ABORT GUARD INVARIANT: If the time budget expired during the deep search branch,
-        // we completely discard this frame's score mutations to preserve our previous stable iteration.
-        if (controller.shouldStop()) return 0;
-
-        if (score > bestScore) {
-            bestScore = score;
-            bestMove = legalMoves[i];
-        }
-        
-        if (score > alpha) {
-            alpha = score;
-            
-            pv.moves[0] = legalMoves[i];
-            for (size_t j = 0; j < childPv.count; ++j) {
-                if (j + 1 < 64) pv.moves[j + 1] = childPv.moves[j];
-            }
-            pv.count = childPv.count + 1;
-        }
-
-        if (alpha >= beta) {
-            stats.betaCutoffs++;
-            Bitboard targetBit = 1ULL << static_cast<size_t>(legalMoves[i].getToSquare());
-            bool isCaptureMove = (pos.getTotalOccupancy() & targetBit) || (legalMoves[i].getToSquare() == pos.getEnPassantSquare() && pos.getEnPassantSquare() != Square::None);
-            if (!isCaptureMove && ply < 64) {
-                if (s_killerMoves[ply][0].getRawData() != legalMoves[i].getRawData()) {
-                    s_killerMoves[ply][1] = s_killerMoves[ply][0];
-                    s_killerMoves[ply][0] = legalMoves[i];
-                }
-                for (size_t p = 0; p < 12; ++p) {
-                    if (pos.getPieceBitboard(static_cast<Piece>(p)) & (1ULL << static_cast<size_t>(legalMoves[i].getFromSquare()))) {
-                        s_historyTable[p][static_cast<size_t>(legalMoves[i].getToSquare())] += depth * depth;
-                        break;
-                    }
-                }
-            }
-            break; 
-        }
-    }
-
-    if (controller.shouldStop()) return 0;
-
-    TTNodeType storeType = TTNodeType::Exact;
-    if (bestScore <= originalAlpha)  storeType = TTNodeType::UpperBound;
-    else if (bestScore >= beta)      storeType = TTNodeType::LowerBound;
-
-    s_tt.store(pos.getHashKey(), bestScore, bestMove, depth, storeType, 0);
-    return bestScore;
-}
-
 int Search::quiescence(Position& pos, int alpha, int beta, int ply) noexcept {
     auto& controller = SearchController::getInstance();
     auto& stats = controller.getStats();
@@ -182,10 +85,157 @@ int Search::quiescence(Position& pos, int alpha, int beta, int ply) noexcept {
         if (controller.shouldStop()) return 0;
 
         if (score >= beta) return beta;
-        if (score > alpha) alpha = score;
+        if (score > alpha) alpha = standPat;
     }
 
     return alpha;
+}
+
+int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLine& pv, bool allowNull) noexcept {
+    auto& controller = SearchController::getInstance();
+    auto& stats = controller.getStats();
+
+    stats.nodes++;
+    pv.count = 0;
+
+    if (stats.nodes % NODE_CHECK_PERIOD == 0) {
+        controller.checkTime();
+    }
+    if (controller.shouldStop()) return 0;
+
+    if (depth == 0) return quiescence(pos, alpha, beta, ply);
+
+    bool inCheck = MoveGenerator::inCheck(pos, pos.getSideToMove());
+    if (inCheck) {
+        allowNull = false; 
+    }
+
+    int originalAlpha = alpha;
+    Move ttMove;
+    int ttScore = 0;
+    int ttDepth = 0;
+    TTNodeType ttType;
+
+    if (s_tt.probe(pos.getHashKey(), ttScore, ttMove, ttDepth, ttType, alpha, beta)) {
+        if (ttDepth >= depth) {
+            stats.ttHits++;
+            return ttScore;
+        }
+    }
+
+    // =========================================================================
+    // MODULE 6.6: NULL MOVE PRUNING (NMP)
+    // =========================================================================
+    constexpr int R = 2; 
+    if (allowNull && depth >= 3 && !inCheck) {
+        Color side = pos.getSideToMove();
+        Bitboard nonPawnMaterial = (side == Color::White) 
+            ? (pos.getPieceBitboard(Piece::WhiteKnight) | pos.getPieceBitboard(Piece::WhiteBishop) |
+               pos.getPieceBitboard(Piece::WhiteRook)   | pos.getPieceBitboard(Piece::WhiteQueen))
+            : (pos.getPieceBitboard(Piece::BlackKnight) | pos.getPieceBitboard(Piece::BlackBishop) |
+               pos.getPieceBitboard(Piece::BlackRook)   | pos.getPieceBitboard(Piece::BlackQueen));
+
+        if (nonPawnMaterial != 0) {
+            stats.nullAttempts++;
+            
+            // Inline Null Move Simulation Block
+            Color originalSide = pos.getSideToMove();
+            Square originalEp = pos.getEnPassantSquare();
+            
+            pos.setSideToMove((originalSide == Color::White) ? Color::Black : Color::White);
+            pos.setEnPassantSquare(Square::None);
+            
+            PVLine nullPv;
+            int nullScore = -negamax(pos, depth - 1 - R, -beta, -beta + 1, ply + 1, nullPv, false);
+            
+            // Restore original position state invariants
+            pos.setSideToMove(originalSide);
+            pos.setEnPassantSquare(originalEp);
+
+            if (controller.shouldStop()) return 0;
+
+            if (nullScore >= beta) {
+                stats.nullCutoffs++;
+                stats.betaCutoffs++;
+                s_tt.store(pos.getHashKey(), beta, Move(), depth, TTNodeType::LowerBound, 0);
+                return beta; 
+            } else {
+                stats.nullFailures++;
+            }
+        } else {
+            stats.nullDisabled++;
+        }
+    }
+
+    MoveList legalMoves;
+    MoveGenerator::generateLegalMoves(pos, legalMoves);
+
+    if (legalMoves.size() == 0) {
+        if (inCheck) return -MATE + ply; 
+        return 0; 
+    }
+
+    MoveOrderer::scoreAndSortMoves(pos, legalMoves, ttMove, s_killerMoves, s_historyTable, ply);
+
+    int bestScore = -INF;
+    Move bestMove;
+    PVLine childPv;
+
+    for (size_t i = 0; i < legalMoves.size(); ++i) {
+        UndoState undo;
+        MoveExecutor::makeMove(pos, legalMoves[i], undo);
+        
+        int score = -negamax(pos, depth - 1, -beta, -alpha, ply + 1, childPv, true);
+        
+        MoveExecutor::undoMove(pos, legalMoves[i], undo);
+
+        if (controller.shouldStop()) return 0;
+
+        if (score > bestScore) {
+            bestScore = score;
+            bestMove = legalMoves[i];
+        }
+        
+        if (score > alpha) {
+            alpha = score;
+            
+            pv.moves[0] = legalMoves[i];
+            for (size_t j = 0; j < childPv.count; ++j) {
+                if (j + 1 < 64) pv.moves[j + 1] = childPv.moves[j];
+            }
+            pv.count = childPv.count + 1;
+        }
+
+        if (alpha >= beta) {
+            stats.betaCutoffs++;
+            Bitboard targetBit = 1ULL << static_cast<size_t>(legalMoves[i].getToSquare());
+            bool isCaptureMove = (pos.getTotalOccupancy() & targetBit) || 
+                                 (legalMoves[i].getToSquare() == pos.getEnPassantSquare() && pos.getEnPassantSquare() != Square::None);
+            
+            if (!isCaptureMove && ply < 64) {
+                if (s_killerMoves[ply][0].getRawData() != legalMoves[i].getRawData()) {
+                    s_killerMoves[ply][1] = s_killerMoves[ply][0];
+                    s_killerMoves[ply][0] = legalMoves[i];
+                }
+                for (size_t p = 0; p < 12; ++p) {
+                    if (pos.getPieceBitboard(static_cast<Piece>(p)) & (1ULL << static_cast<size_t>(legalMoves[i].getFromSquare()))) {
+                        s_historyTable[p][static_cast<size_t>(legalMoves[i].getToSquare())] += depth * depth;
+                        break;
+                    }
+                }
+            }
+            break; 
+        }
+    }
+
+    if (controller.shouldStop()) return 0;
+
+    TTNodeType storeType = TTNodeType::Exact;
+    if (bestScore <= originalAlpha)  storeType = TTNodeType::UpperBound;
+    else if (bestScore >= beta)      storeType = TTNodeType::LowerBound;
+
+    s_tt.store(pos.getHashKey(), bestScore, bestMove, depth, storeType, 0);
+    return bestScore;
 }
 
 int Search::runSearch(Position& pos, int maxDepth) noexcept {
@@ -200,12 +250,9 @@ int Search::runSearch(Position& pos, int maxDepth) noexcept {
 
     int lastScore = 0;
     PVLine stablePv;
-    
-    // Configurable base window delta width (30 centipawns)
     int delta = 30;
 
     for (int d = 1; d <= maxDepth; ++d) {
-        // Soft Limit Verification between complete iterations
         if (controller.getTimeManager().hasTimeLimit()) {
             if (controller.getElapsedTimeMs() >= controller.getTimeManager().getSoftLimit()) {
                 stats.stopReason = StopReason::SoftTimeLimit;
@@ -216,68 +263,54 @@ int Search::runSearch(Position& pos, int maxDepth) noexcept {
         int score = 0;
         PVLine iterationPv;
         
-        // Apply Aspiration Windows starting at Depth 5 (once history settles)
         if (d >= 5) {
             int alphaWindow = lastScore - delta;
             int betaWindow = lastScore + delta;
             int researchAttemptsAtThisDepth = 0;
 
             while (true) {
-                // Safeguard against unbounded hanging re-searches if a hard time limit hits
                 if (controller.getTimeManager().hasTimeLimit()) {
                     controller.checkTime();
                     if (controller.shouldStop()) break;
                 }
 
-                score = negamax(pos, d, alphaWindow, betaWindow, 0, iterationPv);
-                
+                score = negamax(pos, d, alphaWindow, betaWindow, 0, iterationPv, true);
                 if (controller.shouldStop()) break;
 
-                // Case A: Fail Low (Score is less than or equal to alpha window)
                 if (score <= alphaWindow) {
                     stats.failLows++;
                     stats.researchCount++;
                     researchAttemptsAtThisDepth++;
-                    
-                    betaWindow = (alphaWindow + betaWindow) / 2; // Tighten beta over the new lower search
+                    betaWindow = (alphaWindow + betaWindow) / 2;
                     alphaWindow = lastScore - (delta * (1 << researchAttemptsAtThisDepth));
-                    
                     if (alphaWindow <= -INF) alphaWindow = -INF;
                 }
-                // Case B: Fail High (Score is greater than or equal to beta window)
                 else if (score >= betaWindow) {
                     stats.failHighs++;
                     stats.researchCount++;
                     researchAttemptsAtThisDepth++;
-                    
-                    alphaWindow = (alphaWindow + betaWindow) / 2; // Tighten alpha over the new upper search
+                    alphaWindow = (alphaWindow + betaWindow) / 2;
                     betaWindow = lastScore + (delta * (1 << researchAttemptsAtThisDepth));
-                    
                     if (betaWindow >= INF) betaWindow = INF;
                 }
-                // Case C: Success (Score lands cleanly inside window bounds)
                 else {
                     stats.aspirationSuccesses++;
                     break;
                 }
 
-                // Safety fallback: if we've widened windows repeatedly without resolving, broaden to infinity
                 if (researchAttemptsAtThisDepth >= 4) {
                     alphaWindow = -INF;
                     betaWindow = INF;
                 }
             }
         } else {
-            // Shallow baseline searches run with standard infinite windows
-            score = negamax(pos, d, -INF, INF, 0, iterationPv);
+            score = negamax(pos, d, -INF, INF, 0, iterationPv, true);
         }
 
-        // If the search was aborted mid-iteration by the time controller, discard it
         if (controller.shouldStop()) {
             break;
         }
 
-        // Deepening frame completed successfully: commit updates
         lastScore = score;
         stablePv = iterationPv;
         stats.completedDepth = d;
@@ -314,6 +347,12 @@ int Search::runSearch(Position& pos, int maxDepth) noexcept {
     std::cout << "  -> Window Fail Highs       : " << stats.failHighs << "\n";
     std::cout << "  -> Window Fail Lows        : " << stats.failLows << "\n";
     std::cout << "  -> Total Re-Searches Hit   : " << stats.researchCount << "\n";
+    
+    std::cout << "\n--- Null Move Pruning Analytics ---\n";
+    std::cout << "  -> Null Move Attempts      : " << stats.nullAttempts << "\n";
+    std::cout << "  -> Null Move Cutoffs       : " << stats.nullCutoffs << "\n";
+    std::cout << "  -> Null Move Failures      : " << stats.nullFailures << "\n";
+    std::cout << "  -> Zugzwang Protections    : " << stats.nullDisabled << "\n";
     std::cout << "[BOSON CLOCK] Search Complete. Stop Reason Code: " << static_cast<int>(stats.stopReason) << "\n";
               
     return lastScore;

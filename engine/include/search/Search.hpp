@@ -17,12 +17,10 @@ class Search {
 public:
     static uint64_t perft(Position& pos, int depth) noexcept;
     static void divide(Position& pos, int depth) noexcept;
-    
-    // Updated signature cleanly isolated from explicit depth numbers
     static int runSearch(Position& pos, int maxDepth) noexcept;
 
 private:
-    static int negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLine& pv) noexcept;
+    static int negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLine& pv, bool allowNull) noexcept;
     static int quiescence(Position& pos, int alpha, int beta, int ply) noexcept;
     static int evaluate(const Position& pos) noexcept;
 
@@ -32,7 +30,7 @@ private:
 
     static constexpr int INF = 32000;
     static constexpr int MATE = 31000;
-    static constexpr uint64_t NODE_CHECK_PERIOD = 2048; // Query period bounds
+    static constexpr uint64_t NODE_CHECK_PERIOD = 2048;
 };
 
 } // namespace Boson
