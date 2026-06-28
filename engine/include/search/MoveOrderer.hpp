@@ -24,7 +24,8 @@ public:
         Move ttMove, 
         const std::array<std::array<Move, 2>, 64>& killerMoves,
         const std::array<std::array<uint32_t, 64>, 12>& historyTable,
-        int ply
+        int ply,
+        Move prevMove // Consumed context parameter
     ) noexcept;
 
 private:

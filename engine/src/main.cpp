@@ -4,17 +4,17 @@
 #include "board/MoveGenerator.hpp"
 #include "search/SearchLimits.hpp"
 #include "search/SearchController.hpp"
-#include "search/LMRPolicy.hpp" // Pull in the policy system
+#include "search/LMRPolicy.hpp"
 #include "search/Search.hpp"
 
 int main() {
     std::ios_base::sync_with_stdio(false);
     std::cin.tie(nullptr);
 
-    std::cout << "[BOSON MAIN] Running Milestone 6 — Late Move Reductions (LMR)\n";
+    std::cout << "[BOSON MAIN] Running Milestone 6 — Counter-Move History (CMH)\n";
     Boson::Zobrist::initialize();
     Boson::MoveGenerator::initializeTables();
-    Boson::LMRPolicy::initializeTable(); // Build lookups matrix
+    Boson::LMRPolicy::initializeTable();
 
     auto pos = Boson::FenParser::parse("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
 

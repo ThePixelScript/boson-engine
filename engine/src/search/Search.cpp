@@ -12,6 +12,7 @@
 namespace Boson {
 
 TranspositionTable Search::s_tt(16);
+CounterMoveTable Search::s_cmTable; // Initialize memory layer
 std::array<std::array<Move, 2>, 64> Search::s_killerMoves{};
 std::array<std::array<uint32_t, 64>, 12> Search::s_historyTable{};
 
@@ -75,7 +76,7 @@ int Search::quiescence(Position& pos, int alpha, int beta, int ply) noexcept {
     
     static const std::array<std::array<Move, 2>, 64> emptyKillers{};
     static const std::array<std::array<uint32_t, 64>, 12> emptyHistory{};
-    MoveOrderer::scoreAndSortMoves(pos, tacticalMoves, Move(), emptyKillers, emptyHistory, ply);
+    MoveOrderer::scoreAndSortMoves(pos, tacticalMoves, Move(), emptyKillers, emptyHistory, ply, Move());
 
     for (size_t i = 0; i < tacticalMoves.size(); ++i) {
         UndoState undo;
@@ -92,7 +93,7 @@ int Search::quiescence(Position& pos, int alpha, int beta, int ply) noexcept {
     return alpha;
 }
 
-int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLine& pv, bool allowNull) noexcept {
+int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLine& pv, bool allowNull, Move prevMove) noexcept {
     auto& controller = SearchController::getInstance();
     auto& stats = controller.getStats();
 
@@ -124,9 +125,7 @@ int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLi
         }
     }
 
-    // =========================================================================
-    // MODULE 6.6: NULL MOVE PRUNING (NMP)
-    // =========================================================================
+    // Null Move Pruning
     constexpr int R = 2; 
     if (allowNull && depth >= 3 && !inCheck) {
         Color side = pos.getSideToMove();
@@ -139,7 +138,6 @@ int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLi
         if (nonPawnMaterial != 0) {
             stats.nullAttempts++;
             
-            // Inline Null Move Simulation Block
             Color originalSide = pos.getSideToMove();
             Square originalEp = pos.getEnPassantSquare();
             
@@ -147,9 +145,8 @@ int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLi
             pos.setEnPassantSquare(Square::None);
             
             PVLine nullPv;
-            int nullScore = -negamax(pos, depth - 1 - R, -beta, -beta + 1, ply + 1, nullPv, false);
+            int nullScore = -negamax(pos, depth - 1 - R, -beta, -beta + 1, ply + 1, nullPv, false, Move());
             
-            // Restore original position state invariants
             pos.setSideToMove(originalSide);
             pos.setEnPassantSquare(originalEp);
 
@@ -176,7 +173,8 @@ int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLi
         return 0; 
     }
 
-    MoveOrderer::scoreAndSortMoves(pos, legalMoves, ttMove, s_killerMoves, s_historyTable, ply);
+    // Correct MoveOrderer Call Site: Pass prevMove to sort counter-moves cleanly
+    MoveOrderer::scoreAndSortMoves(pos, legalMoves, ttMove, s_killerMoves, s_historyTable, ply, prevMove);
 
     int bestScore = -INF;
     Move bestMove;
@@ -186,14 +184,14 @@ int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLi
     for (size_t i = 0; i < legalMoves.size(); ++i) {
         const Move& m = legalMoves[i];
         
-        // Distinguish tactical captures/promotions from quiet moves using target occupancies
         Bitboard targetBit = 1ULL << static_cast<size_t>(m.getToSquare());
         bool isCaptureMove = (pos.getTotalOccupancy() & targetBit) || 
                              (m.getToSquare() == pos.getEnPassantSquare() && pos.getEnPassantSquare() != Square::None);
         
-bool isPromotionMove = ((m.getFromSquare() >= Square::A7 && m.getFromSquare() <= Square::H7 && pos.getPieceBitboard(Piece::WhitePawn) & (1ULL << static_cast<size_t>(m.getFromSquare()))) ||
+        bool isPromotionMove = ((m.getFromSquare() >= Square::A7 && m.getFromSquare() <= Square::H7 && pos.getPieceBitboard(Piece::WhitePawn) & (1ULL << static_cast<size_t>(m.getFromSquare()))) ||
                                 (m.getFromSquare() >= Square::A2 && m.getFromSquare() <= Square::H2 && pos.getPieceBitboard(Piece::BlackPawn) & (1ULL << static_cast<size_t>(m.getFromSquare())))) &&
-                               (static_cast<int>(m.getToSquare()) / 8 == 7 || static_cast<int>(m.getToSquare()) / 8 == 0); // <-- CAST TO INT BEFORE DIVISION
+                               (static_cast<int>(m.getToSquare()) / 8 == 7 || static_cast<int>(m.getToSquare()) / 8 == 0);
+
         UndoState undo;
         MoveExecutor::makeMove(pos, legalMoves[i], undo);
         movesSearched++;
@@ -201,30 +199,21 @@ bool isPromotionMove = ((m.getFromSquare() >= Square::A7 && m.getFromSquare() <=
         int score = -INF;
         int reduction = 0;
 
-        // =========================================================================
-        // MODULE 6.7: LATE MOVE REDUCTION (LMR) CONTROLLER STEP
-        // =========================================================================
         if (depth >= 3 && movesSearched >= 4 && !inCheck && !isCaptureMove && !isPromotionMove) {
             reduction = LMRPolicy::getReduction(depth, movesSearched);
-            
             if (reduction > 0) {
                 stats.lmrAttempts++;
-                // Step A: Search at reduced depth using a narrow scout null-window
-                score = -negamax(pos, depth - 1 - reduction, -alpha - 1, -alpha, ply + 1, childPv, true);
-                
+                score = -negamax(pos, depth - 1 - reduction, -alpha - 1, -alpha, ply + 1, childPv, true, m);
                 if (score > alpha) {
                     stats.researches++;
-                    // Node anomaly detected! Cancel reduction but keep scout window
-                    score = -negamax(pos, depth - 1, -alpha - 1, -alpha, ply + 1, childPv, true);
+                    score = -negamax(pos, depth - 1, -alpha - 1, -alpha, ply + 1, childPv, true, m);
                 }
             }
         }
 
-        // Step B: Full search fallback if LMR was skipped or if a scout search failed high
         if (score == -INF || (score > alpha && reduction > 0)) {
-            score = -negamax(pos, depth - 1, -beta, -alpha, ply + 1, childPv, true);
+            score = -negamax(pos, depth - 1, -beta, -alpha, ply + 1, childPv, true, m);
         }
-        // =========================================================================
 
         MoveExecutor::undoMove(pos, legalMoves[i], undo);
 
@@ -248,14 +237,23 @@ bool isPromotionMove = ((m.getFromSquare() >= Square::A7 && m.getFromSquare() <=
 
         if (alpha >= beta) {
             stats.betaCutoffs++;
+            
+            // Record Counter Move on Cutoff
+            if (prevMove.getRawData() != 0) {
+                s_cmTable.store(prevMove.getFromSquare(), prevMove.getToSquare(), m);
+            }
+
             if (!isCaptureMove && ply < 64) {
-                if (s_killerMoves[ply][0].getRawData() != legalMoves[i].getRawData()) {
+                if (s_killerMoves[ply][0].getRawData() != m.getRawData()) {
                     s_killerMoves[ply][1] = s_killerMoves[ply][0];
-                    s_killerMoves[ply][0] = legalMoves[i];
+                    s_killerMoves[ply][0] = m;
                 }
                 for (size_t p = 0; p < 12; ++p) {
-                    if (pos.getPieceBitboard(static_cast<Piece>(p)) & (1ULL << static_cast<size_t>(legalMoves[i].getFromSquare()))) {
-                        s_historyTable[p][static_cast<size_t>(legalMoves[i].getToSquare())] += depth * depth;
+                    if (pos.getPieceBitboard(static_cast<Piece>(p)) & (1ULL << static_cast<size_t>(m.getFromSquare()))) {
+                        if (s_historyTable[p][static_cast<size_t>(m.getToSquare())] > 50000) {
+                            for (auto& r : s_historyTable) { for (auto& v : r) v /= 2; }
+                        }
+                        s_historyTable[p][static_cast<size_t>(m.getToSquare())] += depth * depth;
                         break;
                     }
                 }
@@ -310,7 +308,7 @@ int Search::runSearch(Position& pos, int maxDepth) noexcept {
                     if (controller.shouldStop()) break;
                 }
 
-                score = negamax(pos, d, alphaWindow, betaWindow, 0, iterationPv, true);
+                score = negamax(pos, d, alphaWindow, betaWindow, 0, iterationPv, true, Move());
                 if (controller.shouldStop()) break;
 
                 if (score <= alphaWindow) {
@@ -340,7 +338,7 @@ int Search::runSearch(Position& pos, int maxDepth) noexcept {
                 }
             }
         } else {
-            score = negamax(pos, d, -INF, INF, 0, iterationPv, true);
+            score = negamax(pos, d, -INF, INF, 0, iterationPv, true, Move());
         }
 
         if (controller.shouldStop()) {
@@ -402,6 +400,10 @@ int Search::runSearch(Position& pos, int maxDepth) noexcept {
     std::cout << "  -> Triggered Re-Searches   : " << stats.researches << " (" << researchRate << "% of reduced nodes)\n";
     std::cout << "  -> Successful PV Overturns : " << stats.successfulResearches << " (" << successRate << "% efficiency)\n";
 
+    std::cout << "\n--- Counter-Move History (CMH) Analytics ---\n";
+    std::cout << "  -> CMH Table Hits          : " << stats.cmhHits << "\n";
+    std::cout << "  -> CMH Triggered Cutoffs   : " << stats.cmhCutoffs << "\n";
+    
     return lastScore;
 }
 
