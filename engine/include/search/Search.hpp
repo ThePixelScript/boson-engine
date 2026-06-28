@@ -5,6 +5,7 @@
 #include "board/MoveList.hpp"
 #include "search/TranspositionTable.hpp"
 #include "search/CounterMoveTable.hpp"
+#include "search/ContinuationHistoryTable.hpp" // Include memory layout
 #include <array>
 
 namespace Boson {
@@ -21,6 +22,7 @@ public:
     static int runSearch(Position& pos, int maxDepth) noexcept;
 
     [[nodiscard]] static const CounterMoveTable& getCMH() noexcept { return s_cmTable; }
+    [[nodiscard]] static const ContinuationHistoryTable& getContHist() noexcept { return s_chTable; }
 
 private:
     static int negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLine& pv, bool allowNull, Move prevMove) noexcept;
@@ -29,6 +31,7 @@ private:
 
     static TranspositionTable s_tt;
     static CounterMoveTable s_cmTable;
+    static ContinuationHistoryTable s_chTable; // Managed memory layer
     static std::array<std::array<Move, 2>, 64> s_killerMoves;
     static std::array<std::array<uint32_t, 64>, 12> s_historyTable;
 
@@ -38,5 +41,4 @@ private:
 };
 
 } // namespace Boson
-
 #endif // BOSON_SEARCH_HPP

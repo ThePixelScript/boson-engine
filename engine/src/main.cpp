@@ -27,6 +27,12 @@ int main() {
     controller.initSearch(limits, *pos);
 
     Boson::Search::runSearch(*pos, limits.depth);
-
+    std::cout << "[BOSON MAIN] Running Milestone 6 — Continuation History (CONTHIST)\n";
+    Boson::Zobrist::initialize();
+    Boson::MoveGenerator::initializeTables();
+    Boson::LMRPolicy::initializeTable();
+    // Initialize the static table instances
+    const_cast<Boson::ContinuationHistoryTable&>(Boson::Search::getContHist()).clear();
+    
     return 0;
 }

@@ -12,7 +12,8 @@
 namespace Boson {
 
 TranspositionTable Search::s_tt(16);
-CounterMoveTable Search::s_cmTable; // Initialize memory layer
+CounterMoveTable Search::s_cmTable; 
+ContinuationHistoryTable Search::s_chTable;
 std::array<std::array<Move, 2>, 64> Search::s_killerMoves{};
 std::array<std::array<uint32_t, 64>, 12> Search::s_historyTable{};
 
@@ -238,9 +239,18 @@ int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLi
         if (alpha >= beta) {
             stats.betaCutoffs++;
             
-            // Record Counter Move on Cutoff
+            // Contextual Counter Move update
             if (prevMove.getRawData() != 0) {
                 s_cmTable.store(prevMove.getFromSquare(), prevMove.getToSquare(), m);
+                
+                // Extract active moving piece type to update continuation weights
+                for (size_t p = 0; p < 12; ++p) {
+                    if (pos.getPieceBitboard(static_cast<Piece>(p)) & (1ULL << static_cast<size_t>(m.getFromSquare()))) {
+                        stats.conthistCutoffs++;
+                        s_chTable.updateScore(static_cast<Piece>(p), prevMove.getToSquare(), m.getToSquare(), depth * depth);
+                        break;
+                    }
+                }
             }
 
             if (!isCaptureMove && ply < 64) {
@@ -248,10 +258,14 @@ int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLi
                     s_killerMoves[ply][1] = s_killerMoves[ply][0];
                     s_killerMoves[ply][0] = m;
                 }
+                
+                // UNIFIED AGING MECHANISM: Scales down all historical data structures together
                 for (size_t p = 0; p < 12; ++p) {
                     if (pos.getPieceBitboard(static_cast<Piece>(p)) & (1ULL << static_cast<size_t>(m.getFromSquare()))) {
                         if (s_historyTable[p][static_cast<size_t>(m.getToSquare())] > 50000) {
+                            stats.normalizationEvents++;
                             for (auto& r : s_historyTable) { for (auto& v : r) v /= 2; }
+                            s_chTable.normalize(); // Centralized decay sync
                         }
                         s_historyTable[p][static_cast<size_t>(m.getToSquare())] += depth * depth;
                         break;
@@ -403,6 +417,11 @@ int Search::runSearch(Position& pos, int maxDepth) noexcept {
     std::cout << "\n--- Counter-Move History (CMH) Analytics ---\n";
     std::cout << "  -> CMH Table Hits          : " << stats.cmhHits << "\n";
     std::cout << "  -> CMH Triggered Cutoffs   : " << stats.cmhCutoffs << "\n";
+    
+    std::cout << "\n--- Continuation History Analytics ---\n";
+    std::cout << "  -> Continuation Table Hits : " << stats.conthistHits << "\n";
+    std::cout << "  -> Continuation Cutoffs    : " << stats.conthistCutoffs << "\n";
+    std::cout << "  -> Table Normalization Evts: " << stats.normalizationEvents << "\n";
     
     return lastScore;
 }

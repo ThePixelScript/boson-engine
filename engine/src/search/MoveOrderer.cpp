@@ -80,15 +80,25 @@ void MoveOrderer::scoreAndSortMoves(
                     } else if (m.getRawData() == killerMoves[ply][1].getRawData()) {
                         score = SCORE_KILLER_2;
                     } 
-                    // Counter Move Integration Priority Slot
-                    else if (cmhMove.getRawData() != 0 && m.getRawData() == cmhMove.getRawData()) {
-                        stats.cmhHits++;
-                        score = SCORE_KILLER_2 - 100; 
-                    } 
-                    else if (attacker != Piece::None) {
-                        size_t pIdx = static_cast<size_t>(attacker);
-                        size_t toIdx = static_cast<size_t>(m.getToSquare());
-                        score = static_cast<int>(historyTable[pIdx][toIdx]);
+                    else {
+                        // =========================================================================
+                        // EXTENDED LOCAL CONTEXT SORTING STEP
+                        // =========================================================================
+                        int conthistScore = Search::getContHist().getScore(attacker, prevMove.getToSquare(), m.getToSquare());
+                        
+                        if (conthistScore > 0) {
+                            stats.conthistHits++;
+                            score = SCORE_KILLER_2 - 50 + std::min(49, conthistScore / 100);
+                        }
+                        else if (cmhMove.getRawData() != 0 && m.getRawData() == cmhMove.getRawData()) {
+                            stats.cmhHits++;
+                            score = SCORE_KILLER_2 - 100; 
+                        } 
+                        else if (attacker != Piece::None) {
+                            size_t pIdx = static_cast<size_t>(attacker);
+                            size_t toIdx = static_cast<size_t>(m.getToSquare());
+                            score = static_cast<int>(historyTable[pIdx][toIdx]);
+                        }
                     }
                 }
             }
