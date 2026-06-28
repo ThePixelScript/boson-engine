@@ -265,7 +265,8 @@ int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLi
                         if (s_historyTable[p][static_cast<size_t>(m.getToSquare())] > 50000) {
                             stats.normalizationEvents++;
                             for (auto& r : s_historyTable) { for (auto& v : r) v /= 2; }
-                            s_chTable.normalize(); // Centralized decay sync
+                            s_chTable.normalize();
+                            Evaluator::getCorrHist().normalize(); // Synchronized correction aging decay
                         }
                         s_historyTable[p][static_cast<size_t>(m.getToSquare())] += depth * depth;
                         break;
@@ -281,6 +282,16 @@ int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLi
     TTNodeType storeType = TTNodeType::Exact;
     if (bestScore <= originalAlpha)  storeType = TTNodeType::UpperBound;
     else if (bestScore >= beta)      storeType = TTNodeType::LowerBound;
+
+    // =========================================================================
+    // UPDATE RULE: Record evaluation bias only on highly reliable exact nodes
+    // =========================================================================
+    if (storeType == TTNodeType::Exact && !inCheck && depth >= 4) {
+        int staticEval = evaluate(pos);
+        stats.corrUpdates++;
+        Evaluator::getCorrHist().updateCorrection(pos.getSideToMove(), pos.getHashKey(), depth, bestScore, staticEval);
+    }
+    // =========================================================================
 
     s_tt.store(pos.getHashKey(), bestScore, bestMove, depth, storeType, 0);
     return bestScore;
@@ -422,6 +433,11 @@ int Search::runSearch(Position& pos, int maxDepth) noexcept {
     std::cout << "  -> Continuation Table Hits : " << stats.conthistHits << "\n";
     std::cout << "  -> Continuation Cutoffs    : " << stats.conthistCutoffs << "\n";
     std::cout << "  -> Table Normalization Evts: " << stats.normalizationEvents << "\n";
+
+    std::cout << "\n--- Correction History Analytics ---\n";
+    std::cout << "  -> Bias Corrections Applied: " << stats.corrApplied << "\n";
+    std::cout << "  -> Evaluator Bias Updates  : " << stats.corrUpdates << "\n";
+    std::cout << "=================================================================\n";
     
     return lastScore;
 }

@@ -1,5 +1,6 @@
 #include "evaluation/Evaluator.hpp"
 #include "evaluation/PieceSquareTables.hpp"
+#include "search/SearchController.hpp"
 #include <bit>
 
 namespace Boson {
@@ -47,9 +48,21 @@ int Evaluator::evaluate(const Position& pos) noexcept {
     blackScore += scorePieceType(pos.getPieceBitboard(Piece::BlackKing),   0,            PieceSquareTables::KingMiddle, true);
 
     int perspectiveScore = whiteScore - blackScore;
+    int sign = (pos.getSideToMove() == Color::White) ? 1 : -1;
+    int finalScore = perspectiveScore * sign;
 
-    // Return score from the active side to move (Canonical Negamax expectation)
-    return (pos.getSideToMove() == Color::White) ? perspectiveScore : -perspectiveScore;
+    // =========================================================================
+    // CORRHIST HOOK: Read-only query applying positional error calibration bias
+    // =========================================================================
+    int correction = s_corrTable.getCorrection(pos.getSideToMove(), pos.getHashKey());
+    finalScore += correction;
+
+    if (correction != 0) {
+        SearchController::getInstance().getStats().corrApplied++;
+    }
+    // =========================================================================
+
+    return finalScore;
 }
 
 } // namespace Boson

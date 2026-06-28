@@ -36,10 +36,13 @@ struct SearchStatistics {
     uint64_t cmhHits = 0;
     uint64_t cmhCutoffs = 0;
 
-    // Module 6.9 Telemetry
     uint64_t conthistHits = 0;
     uint64_t conthistCutoffs = 0;
     uint32_t normalizationEvents = 0;
+
+    // Module 6.10 Correction History Telemetry
+    uint64_t corrUpdates = 0;
+    uint64_t corrApplied = 0;
 
     void reset() noexcept {
         nodes = qNodes = ttHits = betaCutoffs = elapsedTimeMs = completedDepth = 0;
@@ -50,6 +53,7 @@ struct SearchStatistics {
         lmrAttempts = reducedNodes = researches = successfulResearches = 0;
         cmhHits = cmhCutoffs = 0;
         conthistHits = conthistCutoffs = normalizationEvents = 0;
+        corrUpdates = corrApplied = 0;
     }
 };
 
