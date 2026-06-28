@@ -36,6 +36,12 @@ struct SearchStatistics {
     uint64_t nullFailures = 0;
     uint64_t nullDisabled = 0;
 
+    // Module 6.7: Late Move Reductions Telemetry
+    uint64_t lmrAttempts = 0;
+    uint64_t reducedNodes = 0;
+    uint64_t researches = 0;
+    uint64_t successfulResearches = 0;
+
     void reset() noexcept {
         nodes = 0;
         qNodes = 0;
@@ -53,6 +59,10 @@ struct SearchStatistics {
         nullCutoffs = 0;
         nullFailures = 0;
         nullDisabled = 0;
+        lmrAttempts = 0;
+        reducedNodes = 0;
+        researches = 0;
+        successfulResearches = 0;
     }
 };
 

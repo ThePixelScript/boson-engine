@@ -1,5 +1,6 @@
 #include "search/Search.hpp"
 #include "search/SearchController.hpp"
+#include "search/LMRPolicy.hpp"
 #include "search/MoveOrderer.hpp"
 #include "search/see/SEE.hpp"
 #include "evaluation/Evaluator.hpp"
@@ -180,13 +181,51 @@ int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLi
     int bestScore = -INF;
     Move bestMove;
     PVLine childPv;
+    int movesSearched = 0;
 
     for (size_t i = 0; i < legalMoves.size(); ++i) {
+        const Move& m = legalMoves[i];
+        
+        // Distinguish tactical captures/promotions from quiet moves using target occupancies
+        Bitboard targetBit = 1ULL << static_cast<size_t>(m.getToSquare());
+        bool isCaptureMove = (pos.getTotalOccupancy() & targetBit) || 
+                             (m.getToSquare() == pos.getEnPassantSquare() && pos.getEnPassantSquare() != Square::None);
+        
+bool isPromotionMove = ((m.getFromSquare() >= Square::A7 && m.getFromSquare() <= Square::H7 && pos.getPieceBitboard(Piece::WhitePawn) & (1ULL << static_cast<size_t>(m.getFromSquare()))) ||
+                                (m.getFromSquare() >= Square::A2 && m.getFromSquare() <= Square::H2 && pos.getPieceBitboard(Piece::BlackPawn) & (1ULL << static_cast<size_t>(m.getFromSquare())))) &&
+                               (static_cast<int>(m.getToSquare()) / 8 == 7 || static_cast<int>(m.getToSquare()) / 8 == 0); // <-- CAST TO INT BEFORE DIVISION
         UndoState undo;
         MoveExecutor::makeMove(pos, legalMoves[i], undo);
-        
-        int score = -negamax(pos, depth - 1, -beta, -alpha, ply + 1, childPv, true);
-        
+        movesSearched++;
+
+        int score = -INF;
+        int reduction = 0;
+
+        // =========================================================================
+        // MODULE 6.7: LATE MOVE REDUCTION (LMR) CONTROLLER STEP
+        // =========================================================================
+        if (depth >= 3 && movesSearched >= 4 && !inCheck && !isCaptureMove && !isPromotionMove) {
+            reduction = LMRPolicy::getReduction(depth, movesSearched);
+            
+            if (reduction > 0) {
+                stats.lmrAttempts++;
+                // Step A: Search at reduced depth using a narrow scout null-window
+                score = -negamax(pos, depth - 1 - reduction, -alpha - 1, -alpha, ply + 1, childPv, true);
+                
+                if (score > alpha) {
+                    stats.researches++;
+                    // Node anomaly detected! Cancel reduction but keep scout window
+                    score = -negamax(pos, depth - 1, -alpha - 1, -alpha, ply + 1, childPv, true);
+                }
+            }
+        }
+
+        // Step B: Full search fallback if LMR was skipped or if a scout search failed high
+        if (score == -INF || (score > alpha && reduction > 0)) {
+            score = -negamax(pos, depth - 1, -beta, -alpha, ply + 1, childPv, true);
+        }
+        // =========================================================================
+
         MoveExecutor::undoMove(pos, legalMoves[i], undo);
 
         if (controller.shouldStop()) return 0;
@@ -197,6 +236,7 @@ int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLi
         }
         
         if (score > alpha) {
+            if (reduction > 0) stats.successfulResearches++;
             alpha = score;
             
             pv.moves[0] = legalMoves[i];
@@ -208,10 +248,6 @@ int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLi
 
         if (alpha >= beta) {
             stats.betaCutoffs++;
-            Bitboard targetBit = 1ULL << static_cast<size_t>(legalMoves[i].getToSquare());
-            bool isCaptureMove = (pos.getTotalOccupancy() & targetBit) || 
-                                 (legalMoves[i].getToSquare() == pos.getEnPassantSquare() && pos.getEnPassantSquare() != Square::None);
-            
             if (!isCaptureMove && ply < 64) {
                 if (s_killerMoves[ply][0].getRawData() != legalMoves[i].getRawData()) {
                     s_killerMoves[ply][1] = s_killerMoves[ply][0];
@@ -354,7 +390,18 @@ int Search::runSearch(Position& pos, int maxDepth) noexcept {
     std::cout << "  -> Null Move Failures      : " << stats.nullFailures << "\n";
     std::cout << "  -> Zugzwang Protections    : " << stats.nullDisabled << "\n";
     std::cout << "[BOSON CLOCK] Search Complete. Stop Reason Code: " << static_cast<int>(stats.stopReason) << "\n";
-              
+    
+    std::cout << "\n--- Late Move Reduction Analytics ---\n";
+    std::cout << "  -> LMR Reduction Attempts  : " << stats.lmrAttempts << "\n";
+    
+    // Explicit safety check to prevent divide-by-zero outputs on quick shallow runs
+    uint64_t totalLmr = stats.lmrAttempts;
+    double researchRate = totalLmr > 0 ? (static_cast<double>(stats.researches) / totalLmr) * 100.0 : 0.0;
+    double successRate = stats.researches > 0 ? (static_cast<double>(stats.successfulResearches) / stats.researches) * 100.0 : 0.0;
+
+    std::cout << "  -> Triggered Re-Searches   : " << stats.researches << " (" << researchRate << "% of reduced nodes)\n";
+    std::cout << "  -> Successful PV Overturns : " << stats.successfulResearches << " (" << successRate << "% efficiency)\n";
+
     return lastScore;
 }
 
