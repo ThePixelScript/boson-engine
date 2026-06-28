@@ -23,12 +23,12 @@ public:
     // Default constructor (Creates a null move)
     constexpr Move() noexcept : m_data(0) {}
 
-    // Packed Constructor: 6 bits From, 6 bits To, 3 bits Flags, 3 bits Promo Piece
+    // Packed Constructor: Changed cast to uint32_t to fully accommodate 18 bits safely
     constexpr Move(Square from, Square to, Flags flags = Flags::None, PromotionPiece promo = PromotionPiece::None) noexcept 
-        : m_data(static_cast<uint16_t>(from) | 
-                (static_cast<uint16_t>(to) << 6) | 
-                (static_cast<uint16_t>(flags) << 12) | 
-                (static_cast<uint16_t>(promo) << 15)) {}
+        : m_data(static_cast<uint32_t>(from) | 
+                (static_cast<uint32_t>(to) << 6) | 
+                (static_cast<uint32_t>(flags) << 12) | 
+                (static_cast<uint32_t>(promo) << 15)) {}
 
     // Target Extractors
     constexpr Square getFromSquare() const noexcept { return static_cast<Square>(m_data & 0x3F); }
@@ -42,10 +42,10 @@ public:
     constexpr bool isEnPassant() const noexcept { return getFlags() == Flags::EnPassant; }
     constexpr bool isPromotion() const noexcept { return getFlags() == Flags::Promotion; }
 
-    constexpr uint16_t getRawData() const noexcept { return m_data; }
+    constexpr uint32_t getRawData() const noexcept { return m_data; }
 
 private:
-    uint16_t m_data;
+    uint32_t m_data; // Changed from uint16_t to uint32_t to stop bit truncation
 };
 
 } // namespace Boson

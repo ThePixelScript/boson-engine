@@ -14,7 +14,7 @@ void MoveExecutor::makeMove(Position& pos, const Move& move, UndoState& undoStat
     undoState.halfmoveClock = pos.getHalfmoveClock();
     undoState.capturedPiece = Piece::None;
 
-    // Identify the piece moving
+    // Identify the piece moving cleanly
     Piece movingPiece = Piece::None;
     for (uint8_t p = 0; p < 12; ++p) {
         if (pos.getPieceBitboard(static_cast<Piece>(p)) & Bitboards::getSquareBit(from)) {
@@ -79,17 +79,15 @@ void MoveExecutor::makeMove(Position& pos, const Move& move, UndoState& undoStat
         }
     }
 
-    // 6. ULTIMATE COMMUNITY-STANDARD CASTLING STATE DESTRUCTION
+    // 6. CASTLING STATE DESTRUCTION
     uint8_t rightsRaw = static_cast<uint8_t>(pos.getCastlingRights());
     
-    // King movements strip everything for that color side
     if (movingPiece == Piece::WhiteKing) {
         rightsRaw &= ~(static_cast<uint8_t>(CastlingRights::WhiteOO) | static_cast<uint8_t>(CastlingRights::WhiteOOO));
     } else if (movingPiece == Piece::BlackKing) {
         rightsRaw &= ~(static_cast<uint8_t>(CastlingRights::BlackOO) | static_cast<uint8_t>(CastlingRights::BlackOOO));
     }
     
-    // IRONCLAD LAW: Moving out of OR landing on a corner square permanently strips rights unconditionally
     if (from == Square::H1 || to == Square::H1) rightsRaw &= ~static_cast<uint8_t>(CastlingRights::WhiteOO);
     if (from == Square::A1 || to == Square::A1) rightsRaw &= ~static_cast<uint8_t>(CastlingRights::WhiteOOO);
     if (from == Square::H8 || to == Square::H8) rightsRaw &= ~static_cast<uint8_t>(CastlingRights::BlackOO);
@@ -139,6 +137,7 @@ void MoveExecutor::undoMove(Position& pos, const Move& move, const UndoState& un
         pos.setPieceBit(from, pieceOnTo);
     }
 
+    // DECOUPLED CAPTURE RESTORATION FLOW
     if (move.isEnPassant()) {
         Square victimSq = (originalUs == Color::White) ? static_cast<Square>(static_cast<int>(to) - 8) 
                                                        : static_cast<Square>(static_cast<int>(to) + 8);

@@ -70,7 +70,7 @@ events:
       The output was:
       0
       MSBuild version 18.7.8+1ac568fee for .NET Framework
-      Build started 6/27/2026 4:25:41 PM.
+      Build started 6/28/2026 11:59:16 PM.
       
       Project "C:\\Users\\Dell\\Desktop\\Programming\\Project\\Boson\\build\\CMakeFiles\\4.3.4\\CompilerIdCXX\\CompilerIdCXX.vcxproj" on node 1 (default targets).
       PrepareForBuild:
@@ -99,7 +99,7 @@ events:
           0 Warning(s)
           0 Error(s)
       
-      Time Elapsed 00:00:03.14
+      Time Elapsed 00:00:02.37
       
       
       Compilation of the CXX compiler identification source "CMakeCXXCompilerId.cpp" produced "CompilerIdCXX.exe"
@@ -602,9 +602,9 @@ events:
       - "C:/Program Files/CMake/bin/"
       - "C:/Program Files/CMake/sbin/"
       - "C:/Program Files/CMake/"
-      - "C:/Program Files (x86)/Boson/bin/"
-      - "C:/Program Files (x86)/Boson/sbin/"
-      - "C:/Program Files (x86)/Boson/"
+      - "C:/Program Files/Boson/bin/"
+      - "C:/Program Files/Boson/sbin/"
+      - "C:/Program Files/Boson/"
     searched_directories:
       - "C:/Program Files (x86)/Common Files/Oracle/Java/javapath/rc.com"
       - "C:/Program Files (x86)/Common Files/Oracle/Java/javapath/rc.exe"
@@ -690,15 +690,15 @@ events:
       - "C:/Program Files/CMake/rc.com"
       - "C:/Program Files/CMake/rc.exe"
       - "C:/Program Files/CMake/rc"
-      - "C:/Program Files (x86)/Boson/bin/rc.com"
-      - "C:/Program Files (x86)/Boson/bin/rc.exe"
-      - "C:/Program Files (x86)/Boson/bin/rc"
-      - "C:/Program Files (x86)/Boson/sbin/rc.com"
-      - "C:/Program Files (x86)/Boson/sbin/rc.exe"
-      - "C:/Program Files (x86)/Boson/sbin/rc"
-      - "C:/Program Files (x86)/Boson/rc.com"
-      - "C:/Program Files (x86)/Boson/rc.exe"
-      - "C:/Program Files (x86)/Boson/rc"
+      - "C:/Program Files/Boson/bin/rc.com"
+      - "C:/Program Files/Boson/bin/rc.exe"
+      - "C:/Program Files/Boson/bin/rc"
+      - "C:/Program Files/Boson/sbin/rc.com"
+      - "C:/Program Files/Boson/sbin/rc.exe"
+      - "C:/Program Files/Boson/sbin/rc"
+      - "C:/Program Files/Boson/rc.com"
+      - "C:/Program Files/Boson/rc.exe"
+      - "C:/Program Files/Boson/rc"
     found: false
     search_context:
       ENV{PATH}:
@@ -721,12 +721,12 @@ events:
         - "C:\\Users\\Dell\\AppData\\Local\\Python\\bin"
         - "C:\\development\\flutter\\bin"
         - "C:\\Users\\Dell\\AppData\\Local\\Programs\\cursor\\resources\\app\\bin"
-      CMAKE_INSTALL_PREFIX: "C:/Program Files (x86)/Boson"
+      CMAKE_INSTALL_PREFIX: "C:/Program Files/Boson"
       CMAKE_SYSTEM_PREFIX_PATH:
         - "C:/Program Files"
         - "C:/Program Files (x86)"
         - "C:/Program Files/CMake"
-        - "C:/Program Files (x86)/Boson"
+        - "C:/Program Files/Boson"
   -
     kind: "try_compile-v1"
     backtrace:
@@ -736,8 +736,8 @@ events:
     checks:
       - "Detecting CXX compiler ABI info"
     directories:
-      source: "C:/Users/Dell/Desktop/Programming/Project/Boson/build/CMakeFiles/CMakeScratch/TryCompile-57e9nd"
-      binary: "C:/Users/Dell/Desktop/Programming/Project/Boson/build/CMakeFiles/CMakeScratch/TryCompile-57e9nd"
+      source: "C:/Users/Dell/Desktop/Programming/Project/Boson/build/CMakeFiles/CMakeScratch/TryCompile-eaip37"
+      binary: "C:/Users/Dell/Desktop/Programming/Project/Boson/build/CMakeFiles/CMakeScratch/TryCompile-eaip37"
     cmakeVariables:
       CMAKE_CXX_FLAGS: "/DWIN32 /D_WINDOWS /EHsc"
       CMAKE_CXX_FLAGS_DEBUG: "/Ob0 /Od /RTC1"
@@ -748,39 +748,39 @@ events:
       variable: "CMAKE_CXX_ABI_COMPILED"
       cached: true
       stdout: |
-        Change Dir: 'C:/Users/Dell/Desktop/Programming/Project/Boson/build/CMakeFiles/CMakeScratch/TryCompile-57e9nd'
+        Change Dir: 'C:/Users/Dell/Desktop/Programming/Project/Boson/build/CMakeFiles/CMakeScratch/TryCompile-eaip37'
         
-        Run Build Command(s): "C:/Program Files (x86)/Microsoft Visual Studio/18/BuildTools/MSBuild/Current/Bin/amd64/MSBuild.exe" cmTC_232e8.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=18.0 /v:n
+        Run Build Command(s): "C:/Program Files (x86)/Microsoft Visual Studio/18/BuildTools/MSBuild/Current/Bin/amd64/MSBuild.exe" cmTC_9cb86.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=18.0 /v:n
         MSBuild version 18.7.8+1ac568fee for .NET Framework
-        Build started 6/27/2026 4:25:46 PM.
+        Build started 6/28/2026 11:59:19 PM.
         
-        Project "C:\\Users\\Dell\\Desktop\\Programming\\Project\\Boson\\build\\CMakeFiles\\CMakeScratch\\TryCompile-57e9nd\\cmTC_232e8.vcxproj" on node 1 (default targets).
+        Project "C:\\Users\\Dell\\Desktop\\Programming\\Project\\Boson\\build\\CMakeFiles\\CMakeScratch\\TryCompile-eaip37\\cmTC_9cb86.vcxproj" on node 1 (default targets).
         PrepareForBuild:
           Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
-          Creating directory "C:\\Users\\Dell\\Desktop\\Programming\\Project\\Boson\\build\\CMakeFiles\\CMakeScratch\\TryCompile-57e9nd\\Debug\\".
-          Creating directory "cmTC_232e8.dir\\Debug\\cmTC_232e8.tlog\\".
+          Creating directory "C:\\Users\\Dell\\Desktop\\Programming\\Project\\Boson\\build\\CMakeFiles\\CMakeScratch\\TryCompile-eaip37\\Debug\\".
+          Creating directory "cmTC_9cb86.dir\\Debug\\cmTC_9cb86.tlog\\".
         InitializeBuildStatus:
-          Creating "cmTC_232e8.dir\\Debug\\cmTC_232e8.tlog\\unsuccessfulbuild" because "AlwaysCreate" was specified.
-          Touching "cmTC_232e8.dir\\Debug\\cmTC_232e8.tlog\\unsuccessfulbuild".
+          Creating "cmTC_9cb86.dir\\Debug\\cmTC_9cb86.tlog\\unsuccessfulbuild" because "AlwaysCreate" was specified.
+          Touching "cmTC_9cb86.dir\\Debug\\cmTC_9cb86.tlog\\unsuccessfulbuild".
         ClCompile:
-          C:\\Program Files (x86)\\Microsoft Visual Studio\\18\\BuildTools\\VC\\Tools\\MSVC\\14.51.36231\\bin\\HostX64\\x64\\CL.exe /c /Zi /W1 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /EHsc /RTC1 /MDd /Fo"cmTC_232e8.dir\\Debug\\\\" /Fd"cmTC_232e8.dir\\Debug\\vc145.pdb" /external:W1 /TP /errorReport:queue "C:\\Program Files\\CMake\\share\\cmake-4.3\\Modules\\CMakeCXXCompilerABI.cpp"
+          C:\\Program Files (x86)\\Microsoft Visual Studio\\18\\BuildTools\\VC\\Tools\\MSVC\\14.51.36231\\bin\\HostX64\\x64\\CL.exe /c /Zi /W1 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /EHsc /RTC1 /MDd /Fo"cmTC_9cb86.dir\\Debug\\\\" /Fd"cmTC_9cb86.dir\\Debug\\vc145.pdb" /external:W1 /TP /errorReport:queue "C:\\Program Files\\CMake\\share\\cmake-4.3\\Modules\\CMakeCXXCompilerABI.cpp"
           Microsoft (R) C/C++ Optimizing Compiler Version 19.51.36248 for x64
           Copyright (C) Microsoft Corporation.  All rights reserved.
-          cl /c /Zi /W1 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /EHsc /RTC1 /MDd /Fo"cmTC_232e8.dir\\Debug\\\\" /Fd"cmTC_232e8.dir\\Debug\\vc145.pdb" /external:W1 /TP /errorReport:queue "C:\\Program Files\\CMake\\share\\cmake-4.3\\Modules\\CMakeCXXCompilerABI.cpp"
+          cl /c /Zi /W1 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /EHsc /RTC1 /MDd /Fo"cmTC_9cb86.dir\\Debug\\\\" /Fd"cmTC_9cb86.dir\\Debug\\vc145.pdb" /external:W1 /TP /errorReport:queue "C:\\Program Files\\CMake\\share\\cmake-4.3\\Modules\\CMakeCXXCompilerABI.cpp"
           CMakeCXXCompilerABI.cpp
         Link:
-          C:\\Program Files (x86)\\Microsoft Visual Studio\\18\\BuildTools\\VC\\Tools\\MSVC\\14.51.36231\\bin\\HostX64\\x64\\link.exe /OUT:"C:\\Users\\Dell\\Desktop\\Programming\\Project\\Boson\\build\\CMakeFiles\\CMakeScratch\\TryCompile-57e9nd\\Debug\\cmTC_232e8.exe" /INCREMENTAL /ILK:"cmTC_232e8.dir\\Debug\\cmTC_232e8.ilk" /NOLOGO kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /DEBUG /PDB:"C:/Users/Dell/Desktop/Programming/Project/Boson/build/CMakeFiles/CMakeScratch/TryCompile-57e9nd/Debug/cmTC_232e8.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /IMPLIB:"C:/Users/Dell/Desktop/Programming/Project/Boson/build/CMakeFiles/CMakeScratch/TryCompile-57e9nd/Debug/cmTC_232e8.lib" /MACHINE:X64  /machine:x64 cmTC_232e8.dir\\Debug\\CMakeCXXCompilerABI.obj
-          cmTC_232e8.vcxproj -> C:\\Users\\Dell\\Desktop\\Programming\\Project\\Boson\\build\\CMakeFiles\\CMakeScratch\\TryCompile-57e9nd\\Debug\\cmTC_232e8.exe
+          C:\\Program Files (x86)\\Microsoft Visual Studio\\18\\BuildTools\\VC\\Tools\\MSVC\\14.51.36231\\bin\\HostX64\\x64\\link.exe /OUT:"C:\\Users\\Dell\\Desktop\\Programming\\Project\\Boson\\build\\CMakeFiles\\CMakeScratch\\TryCompile-eaip37\\Debug\\cmTC_9cb86.exe" /INCREMENTAL /ILK:"cmTC_9cb86.dir\\Debug\\cmTC_9cb86.ilk" /NOLOGO kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /DEBUG /PDB:"C:/Users/Dell/Desktop/Programming/Project/Boson/build/CMakeFiles/CMakeScratch/TryCompile-eaip37/Debug/cmTC_9cb86.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /IMPLIB:"C:/Users/Dell/Desktop/Programming/Project/Boson/build/CMakeFiles/CMakeScratch/TryCompile-eaip37/Debug/cmTC_9cb86.lib" /MACHINE:X64  /machine:x64 cmTC_9cb86.dir\\Debug\\CMakeCXXCompilerABI.obj
+          cmTC_9cb86.vcxproj -> C:\\Users\\Dell\\Desktop\\Programming\\Project\\Boson\\build\\CMakeFiles\\CMakeScratch\\TryCompile-eaip37\\Debug\\cmTC_9cb86.exe
         FinalizeBuildStatus:
-          Deleting file "cmTC_232e8.dir\\Debug\\cmTC_232e8.tlog\\unsuccessfulbuild".
-          Touching "cmTC_232e8.dir\\Debug\\cmTC_232e8.tlog\\cmTC_232e8.lastbuildstate".
-        Done Building Project "C:\\Users\\Dell\\Desktop\\Programming\\Project\\Boson\\build\\CMakeFiles\\CMakeScratch\\TryCompile-57e9nd\\cmTC_232e8.vcxproj" (default targets).
+          Deleting file "cmTC_9cb86.dir\\Debug\\cmTC_9cb86.tlog\\unsuccessfulbuild".
+          Touching "cmTC_9cb86.dir\\Debug\\cmTC_9cb86.tlog\\cmTC_9cb86.lastbuildstate".
+        Done Building Project "C:\\Users\\Dell\\Desktop\\Programming\\Project\\Boson\\build\\CMakeFiles\\CMakeScratch\\TryCompile-eaip37\\cmTC_9cb86.vcxproj" (default targets).
         
         Build succeeded.
             0 Warning(s)
             0 Error(s)
         
-        Time Elapsed 00:00:03.98
+        Time Elapsed 00:00:02.66
         
       exitCode: 0
   -
