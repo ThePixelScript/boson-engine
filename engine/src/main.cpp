@@ -1,36 +1,36 @@
 #include <iostream>
-#include "fen/FenParser.hpp"
 #include "search/Zobrist.hpp"
 #include "board/MoveGenerator.hpp"
-#include "search/SearchLimits.hpp"
-#include "search/SearchController.hpp"
 #include "search/LMRPolicy.hpp"
 #include "search/Search.hpp"
 #include "evaluation/Evaluator.hpp"
+#include "validation/VerificationHarness.hpp"
 
 int main() {
     std::ios_base::sync_with_stdio(false);
     std::cin.tie(nullptr);
 
-    std::cout << "[BOSON MAIN] Running Milestone 6 — Correction History (CORRHIST)\n";
+    std::cout << "🏛️  BOSON — MILESTONE Ω: HARNESS GATEWAY\n";
+    
+    // Global Subsystem Initialization
     Boson::Zobrist::initialize();
     Boson::MoveGenerator::initializeTables();
     Boson::LMRPolicy::initializeTable();
     
+    // Clear transient tables between verification states
     const_cast<Boson::ContinuationHistoryTable&>(Boson::Search::getContHist()).clear();
-    Boson::Evaluator::getCorrHist().clear(); // Reset the correction layers
+    Boson::Evaluator::getCorrHist().clear();
 
-    Boson::SearchLimits limits;
-    limits.wtime = 2000;
-    limits.winc = 50;
-    limits.depth = 6; 
+    // Call the newly aligned multi-FEN harness suite
+    bool perftPassed = Boson::VerificationHarness::runComprehensivePerft();
+    if (!perftPassed) {
+        std::cerr << "\n[BOSON AUDIT] TERMINATED: Node anomalies detected during perft verification!\n";
+        return 1;
+    }
 
-    auto pos = Boson::FenParser::parse("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+    // Execute monolithic search engine benchmarks
+    Boson::VerificationHarness::executePerformanceBenchmark();
 
-    auto& controller = Boson::SearchController::getInstance();
-    controller.initSearch(limits, *pos);
-
-    Boson::Search::runSearch(*pos, limits.depth);
-
+    std::cout << "\n[BOSON AUDIT] STATUS: ALL SYSTEMS OPERATIONAL.\n";
     return 0;
 }

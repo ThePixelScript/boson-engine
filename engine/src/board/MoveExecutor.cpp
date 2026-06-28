@@ -6,15 +6,15 @@ void MoveExecutor::makeMove(Position& pos, const Move& move, UndoState& undoStat
     const Square from = move.getFromSquare();
     const Square to = move.getToSquare();
     const Color us = pos.getSideToMove();
-    const Color them = !us;
+    const Color them = (us == Color::White) ? Color::Black : Color::White;
 
-    // 1. Save state flags into UndoState container
+    // 1. Core Environmental Snapshots
     undoState.castlingRights = pos.getCastlingRights();
     undoState.enPassantSquare = pos.getEnPassantSquare();
     undoState.halfmoveClock = pos.getHalfmoveClock();
     undoState.capturedPiece = Piece::None;
 
-    // Identify moving piece identity
+    // Identify the piece moving
     Piece movingPiece = Piece::None;
     for (uint8_t p = 0; p < 12; ++p) {
         if (pos.getPieceBitboard(static_cast<Piece>(p)) & Bitboards::getSquareBit(from)) {
@@ -26,7 +26,7 @@ void MoveExecutor::makeMove(Position& pos, const Move& move, UndoState& undoStat
     // 2. Clear moving piece from source
     pos.clearPieceBit(from, movingPiece);
 
-    // 3. Process Capture Collisions (Normal, Promotion, or En Passant)
+    // 3. Process Captures Cleanly
     if (move.isEnPassant()) {
         Square victimSq = (us == Color::White) ? static_cast<Square>(static_cast<int>(to) - 8) 
                                                : static_cast<Square>(static_cast<int>(to) + 8);
@@ -42,7 +42,7 @@ void MoveExecutor::makeMove(Position& pos, const Move& move, UndoState& undoStat
         }
     }
 
-    // 4. Place Moving or Promoted Piece
+    // 4. Handle Placement & Promotion Variants
     if (move.isPromotion()) {
         auto promoType = move.getPromotionPiece();
         Piece promoPiece = Piece::None;
@@ -62,33 +62,34 @@ void MoveExecutor::makeMove(Position& pos, const Move& move, UndoState& undoStat
         pos.setPieceBit(to, movingPiece);
     }
 
-    // 5. Castling Secondary Rook Relocation
+    // 5. Castling Secondary Rook Translocations
     if (move.isCastling()) {
-        if (to == Square::G1) { // White Kingside
+        if (to == Square::G1) {
             pos.clearPieceBit(Square::H1, Piece::WhiteRook);
             pos.setPieceBit(Square::F1, Piece::WhiteRook);
-        } else if (to == Square::C1) { // White Queenside
+        } else if (to == Square::C1) {
             pos.clearPieceBit(Square::A1, Piece::WhiteRook);
             pos.setPieceBit(Square::D1, Piece::WhiteRook);
-        } else if (to == Square::G8) { // Black Kingside
+        } else if (to == Square::G8) {
             pos.clearPieceBit(Square::H8, Piece::BlackRook);
             pos.setPieceBit(Square::F8, Piece::BlackRook);
-        } else if (to == Square::C8) { // Black Queenside
+        } else if (to == Square::C8) {
             pos.clearPieceBit(Square::A8, Piece::BlackRook);
             pos.setPieceBit(Square::D8, Piece::BlackRook);
         }
     }
 
-    // 6. Castling Rights Revocation Math (Safely cast for bitwise operations)
+    // 6. ULTIMATE COMMUNITY-STANDARD CASTLING STATE DESTRUCTION
     uint8_t rightsRaw = static_cast<uint8_t>(pos.getCastlingRights());
     
+    // King movements strip everything for that color side
     if (movingPiece == Piece::WhiteKing) {
         rightsRaw &= ~(static_cast<uint8_t>(CastlingRights::WhiteOO) | static_cast<uint8_t>(CastlingRights::WhiteOOO));
     } else if (movingPiece == Piece::BlackKing) {
         rightsRaw &= ~(static_cast<uint8_t>(CastlingRights::BlackOO) | static_cast<uint8_t>(CastlingRights::BlackOOO));
     }
     
-    // Revoke if rooks move or get captured directly
+    // IRONCLAD LAW: Moving out of OR landing on a corner square permanently strips rights unconditionally
     if (from == Square::H1 || to == Square::H1) rightsRaw &= ~static_cast<uint8_t>(CastlingRights::WhiteOO);
     if (from == Square::A1 || to == Square::A1) rightsRaw &= ~static_cast<uint8_t>(CastlingRights::WhiteOOO);
     if (from == Square::H8 || to == Square::H8) rightsRaw &= ~static_cast<uint8_t>(CastlingRights::BlackOO);
@@ -96,7 +97,7 @@ void MoveExecutor::makeMove(Position& pos, const Move& move, UndoState& undoStat
     
     pos.setCastlingRights(static_cast<CastlingRights>(rightsRaw));
 
-    // 7. Handle Transient En Passant Target Mapping
+    // 7. En Passant Square Caching Validation
     if (move.isDoublePawnPush()) {
         Square epTarget = (us == Color::White) ? static_cast<Square>(static_cast<int>(from) + 8)
                                                : static_cast<Square>(static_cast<int>(from) - 8);
@@ -105,7 +106,6 @@ void MoveExecutor::makeMove(Position& pos, const Move& move, UndoState& undoStat
         pos.setEnPassantSquare(Square::None);
     }
 
-    // Incremental Rebuild of Occupancy Layers
     pos.updateOccupancy();
     pos.setSideToMove(them);
 
@@ -121,10 +121,8 @@ void MoveExecutor::makeMove(Position& pos, const Move& move, UndoState& undoStat
 void MoveExecutor::undoMove(Position& pos, const Move& move, const UndoState& undoState) noexcept {
     const Square from = move.getFromSquare();
     const Square to = move.getToSquare();
-    const Color them = pos.getSideToMove();
-    const Color us = !them;
+    const Color originalUs = (pos.getSideToMove() == Color::White) ? Color::Black : Color::White;
 
-    // Clear whatever is currently on the destination square
     Piece pieceOnTo = Piece::None;
     for (uint8_t p = 0; p < 12; ++p) {
         if (pos.getPieceBitboard(static_cast<Piece>(p)) & Bitboards::getSquareBit(to)) {
@@ -134,24 +132,21 @@ void MoveExecutor::undoMove(Position& pos, const Move& move, const UndoState& un
     }
     pos.clearPieceBit(to, pieceOnTo);
 
-    // Restore Moving Piece back to source
     if (move.isPromotion()) {
-        Piece originalPawn = (us == Color::White) ? Piece::WhitePawn : Piece::BlackPawn;
+        Piece originalPawn = (originalUs == Color::White) ? Piece::WhitePawn : Piece::BlackPawn;
         pos.setPieceBit(from, originalPawn);
     } else {
         pos.setPieceBit(from, pieceOnTo);
     }
 
-    // Restore Captured Pieces
     if (move.isEnPassant()) {
-        Square victimSq = (us == Color::White) ? static_cast<Square>(static_cast<int>(to) - 8) 
-                                               : static_cast<Square>(static_cast<int>(to) + 8);
+        Square victimSq = (originalUs == Color::White) ? static_cast<Square>(static_cast<int>(to) - 8) 
+                                                       : static_cast<Square>(static_cast<int>(to) + 8);
         pos.setPieceBit(victimSq, undoState.capturedPiece);
     } else if (undoState.capturedPiece != Piece::None) {
         pos.setPieceBit(to, undoState.capturedPiece);
     }
 
-    // Invert Castling Rook Placement
     if (move.isCastling()) {
         if (to == Square::G1) {
             pos.clearPieceBit(Square::F1, Piece::WhiteRook);
@@ -168,13 +163,12 @@ void MoveExecutor::undoMove(Position& pos, const Move& move, const UndoState& un
         }
     }
 
-    // Revert Transient Values and Flags
     pos.setCastlingRights(undoState.castlingRights);
     pos.setEnPassantSquare(undoState.enPassantSquare);
     pos.setHalfmoveClock(undoState.halfmoveClock);
-    pos.setSideToMove(us);
+    pos.setSideToMove(originalUs);
 
-    if (us == Color::Black) pos.setFullmoveNumber(pos.getFullmoveNumber() - 1);
+    if (originalUs == Color::Black) pos.setFullmoveNumber(pos.getFullmoveNumber() - 1);
     pos.updateOccupancy();
 }
 

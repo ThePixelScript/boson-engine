@@ -1,4 +1,3 @@
-C:\Users\Dell\Desktop\Programming\Project\Boson\engine\src\main.cpp;C:\Users\Dell\Desktop\Programming\Project\Boson\build\boson.dir\Release\main.obj
 C:\Users\Dell\Desktop\Programming\Project\Boson\engine\src\board\MoveExecutor.cpp;C:\Users\Dell\Desktop\Programming\Project\Boson\build\boson.dir\Release\MoveExecutor.obj
 C:\Users\Dell\Desktop\Programming\Project\Boson\engine\src\board\MoveGenerator.cpp;C:\Users\Dell\Desktop\Programming\Project\Boson\build\boson.dir\Release\MoveGenerator.obj
 C:\Users\Dell\Desktop\Programming\Project\Boson\engine\src\board\Position.cpp;C:\Users\Dell\Desktop\Programming\Project\Boson\build\boson.dir\Release\Position.obj
@@ -6,8 +5,10 @@ C:\Users\Dell\Desktop\Programming\Project\Boson\engine\src\debug\BoardPrinter.cp
 C:\Users\Dell\Desktop\Programming\Project\Boson\engine\src\evaluation\Evaluator.cpp;C:\Users\Dell\Desktop\Programming\Project\Boson\build\boson.dir\Release\Evaluator.obj
 C:\Users\Dell\Desktop\Programming\Project\Boson\engine\src\evaluation\PieceSquareTables.cpp;C:\Users\Dell\Desktop\Programming\Project\Boson\build\boson.dir\Release\PieceSquareTables.obj
 C:\Users\Dell\Desktop\Programming\Project\Boson\engine\src\fen\FenParser.cpp;C:\Users\Dell\Desktop\Programming\Project\Boson\build\boson.dir\Release\FenParser.obj
+C:\Users\Dell\Desktop\Programming\Project\Boson\engine\src\main.cpp;C:\Users\Dell\Desktop\Programming\Project\Boson\build\boson.dir\Release\main.obj
 C:\Users\Dell\Desktop\Programming\Project\Boson\engine\src\search\MoveOrderer.cpp;C:\Users\Dell\Desktop\Programming\Project\Boson\build\boson.dir\Release\MoveOrderer.obj
 C:\Users\Dell\Desktop\Programming\Project\Boson\engine\src\search\Search.cpp;C:\Users\Dell\Desktop\Programming\Project\Boson\build\boson.dir\Release\Search.obj
 C:\Users\Dell\Desktop\Programming\Project\Boson\engine\src\search\TranspositionTable.cpp;C:\Users\Dell\Desktop\Programming\Project\Boson\build\boson.dir\Release\TranspositionTable.obj
 C:\Users\Dell\Desktop\Programming\Project\Boson\engine\src\search\Zobrist.cpp;C:\Users\Dell\Desktop\Programming\Project\Boson\build\boson.dir\Release\Zobrist.obj
 C:\Users\Dell\Desktop\Programming\Project\Boson\engine\src\search\see\SEE.cpp;C:\Users\Dell\Desktop\Programming\Project\Boson\build\boson.dir\Release\SEE.obj
+C:\Users\Dell\Desktop\Programming\Project\Boson\engine\src\validation\VerificationHarness.cpp;C:\Users\Dell\Desktop\Programming\Project\Boson\build\boson.dir\Release\VerificationHarness.obj

@@ -32,13 +32,11 @@ else()
     )
 endif()
 
+# Since CMakeLists.txt is inside 'engine/', headers are just in 'include/'
 include_directories(include)
 
-# Gather source implementation files
-file(GLOB_RECURSE SOURCES "src/*.cpp")
+# Gather all source files dynamically from 'src/' relative to this file
+file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS "src/*.cpp")
 
 # Core engine target configuration
-add_executable(boson src/main.cpp ${SOURCES})
-
-# Update the include line inside engine/CMakeLists.txt to match this:
-include_directories(include board fen debug)
+add_executable(boson ${SOURCES})

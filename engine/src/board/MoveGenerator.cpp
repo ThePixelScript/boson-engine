@@ -66,35 +66,41 @@ void MoveGenerator::initializeTables() noexcept {
     s_initialized = true;
 }
 
-Bitboard MoveGenerator::calculateSlidingAttacks([[maybe_unused]] Square sq, Bitboard occupancy, const std::array<Bitboard, 4>& rays, const std::array<int, 4>& shifts, bool isRook) noexcept {
+Bitboard MoveGenerator::calculateSlidingAttacks([[maybe_unused]] Square sq, Bitboard occupancy, [[maybe_unused]] const std::array<Bitboard, 4>& rays, [[maybe_unused]] const std::array<int, 4>& shifts, bool isRook) noexcept {
     Bitboard attacks = 0ULL;
+    const int sqInt = static_cast<int>(sq);
+
+    // Explicit coordinate offsets for step calculations
+    // Rook:   0=North (+8), 1=South (-8), 2=East (+1), 3=West (-1)
+    // Bishop: 0=NE (+9),    1=NW (+7),    2=SE (-7),   3=SW (-9)
+    std::array<int, 4> stepOffsets;
+    if (isRook) {
+        stepOffsets = {8, -8, 1, -1};
+    } else {
+        stepOffsets = {9, 7, -7, -9};
+    }
 
     for (int dir = 0; dir < 4; ++dir) {
-        Bitboard ray = rays[dir];
-        Bitboard blockers = ray & occupancy;
+        int currentSq = sqInt;
+        int step = stepOffsets[dir];
 
-        if (!blockers) {
-            attacks |= ray;
-        } else {
-            unsigned long blockerSq = 0;
-            if (shifts[dir] > 0) {
-                #if defined(_MSC_VER)
-                    _BitScanForward64(&blockerSq, blockers);
-                #else
-                    blockerSq = __builtin_ctzll(blockers);
-                #endif
-                Bitboard trailingRay = isRook ? s_rookRays[blockerSq][dir] : s_bishopRays[blockerSq][dir];
-                attacks |= (ray & ~trailingRay);
-            } else {
-                #if defined(_MSC_VER)
-                    _BitScanReverse64(&blockerSq, blockers);
-                #else
-                    blockerSq = 63 - __builtin_clzll(blockers);
-                #endif
-                Bitboard trailingRay = isRook ? s_rookRays[blockerSq][dir] : s_bishopRays[blockerSq][dir];
-                attacks |= (ray & ~trailingRay);
-            }
-            attacks |= (1ULL << blockerSq); 
+        while (true) {
+            int nextSq = currentSq + step;
+            
+            // 1. Boundary check: ensure the square is strictly on the 8x8 board
+            if (nextSq < 0 || nextSq >= 64) break;
+            
+            // 2. Prevent wrapping past edge columns (File A to File H leaks)
+            int currFile = currentSq % 8;
+            int nextFile = nextSq % 8;
+            if (std::abs(currFile - nextFile) > 2) break; 
+
+            attacks |= (1ULL << nextSq);
+
+            // 3. Stop if we encounter an obstacle/occupancy bit
+            if (occupancy & (1ULL << nextSq)) break;
+
+            currentSq = nextSq;
         }
     }
     return attacks;
@@ -338,17 +344,29 @@ void MoveGenerator::generatePawnCaptures(const Position& pos, Bitboard pawns, in
 
 bool MoveGenerator::isSquareAttacked(const Position& pos, Square sq, Color attacker) noexcept {
     const Bitboard totalOcc = pos.getTotalOccupancy();
+    const int sqInt = static_cast<int>(sq);
 
-// 1. Pawn Attacks (Look backwards using opposing color's capture targets)
+    // 1. Pawn Attacks (Look backwards to find attacking pawns)
     Bitboard pawns = pos.getPieceBitboard((attacker == Color::White) ? Piece::WhitePawn : Piece::BlackPawn);
-    int sqInt = static_cast<int>(sq);
-
+    
     if (attacker == Color::White) {
-        if (sqInt >= 7 && ((1ULL << (sqInt - 7)) & pawns) && (sqInt % 8 != 0)) return true;
-        if (sqInt >= 9 && ((1ULL << (sqInt - 9)) & pawns) && (sqInt % 8 != 7)) return true;
+        // White pawns attack upwards (from lower indices to higher indices)
+        // So a square is attacked if there is a White pawn down-left or down-right
+        if (sqInt % 8 != 0 && sqInt >= 7) {
+            if ((1ULL << (sqInt - 7)) & pawns) return true;
+        }
+        if (sqInt % 8 != 7 && sqInt >= 9) {
+            if ((1ULL << (sqInt - 9)) & pawns) return true;
+        }
     } else {
-        if (sqInt <= 56 && ((1ULL << (sqInt + 9)) & pawns) && (sqInt % 8 != 0)) return true;
-        if (sqInt <= 54 && ((1ULL << (sqInt + 7)) & pawns) && (sqInt % 8 != 7)) return true;
+        // Black pawns attack downwards (from higher indices to lower indices)
+        // So a square is attacked if there is a Black pawn up-left or up-right
+        if (sqInt % 8 != 0 && sqInt <= 54) { // Max valid source index is 54+9 = 63
+            if ((1ULL << (sqInt + 9)) & pawns) return true;
+        }
+        if (sqInt % 8 != 7 && sqInt <= 56) { // Max valid source index is 56+7 = 63
+            if ((1ULL << (sqInt + 7)) & pawns) return true;
+        }
     }
 
     // 2. Knight Attacks
@@ -389,6 +407,7 @@ bool MoveGenerator::inCheck(const Position& pos, Color side) noexcept {
 
 void MoveGenerator::generateLegalMoves(Position& pos, MoveList& legalMoves) noexcept {
     const Color us = pos.getSideToMove();
+    const Color them = (us == Color::White) ? Color::Black : Color::White;
     
     // 1. Gather all candidate moves across every piece category
     MoveList pseudoMoves;
@@ -404,28 +423,43 @@ void MoveGenerator::generateLegalMoves(Position& pos, MoveList& legalMoves) noex
 
         // Special checking gate for Castling moves
         if (move.isCastling()) {
-            // Cannot castle if currently in check
             if (inCheck(pos, us)) continue;
             
-            [[maybe_unused]] Square from = move.getFromSquare();
             Square to = move.getToSquare();
-            
-            if (to == Square::G1) { // White Kingside (verify f1 passing square)
-                if (isSquareAttacked(pos, Square::F1, !us)) continue;
-            } else if (to == Square::C1) { // White Queenside (verify d1 passing square)
-                if (isSquareAttacked(pos, Square::D1, !us)) continue;
-            } else if (to == Square::G8) { // Black Kingside (verify f8 passing square)
-                if (isSquareAttacked(pos, Square::F8, !us)) continue;
-            } else if (to == Square::C8) { // Black Queenside (verify d8 passing square)
-                if (isSquareAttacked(pos, Square::D8, !us)) continue;
+            if (to == Square::G1) {
+                if (isSquareAttacked(pos, Square::F1, them) || isSquareAttacked(pos, Square::G1, them)) continue;
+            } else if (to == Square::C1) {
+                if (isSquareAttacked(pos, Square::D1, them) || isSquareAttacked(pos, Square::C1, them)) continue;
+            } else if (to == Square::G8) {
+                if (isSquareAttacked(pos, Square::F8, them) || isSquareAttacked(pos, Square::G8, them)) continue;
+            } else if (to == Square::C8) {
+                if (isSquareAttacked(pos, Square::D8, them) || isSquareAttacked(pos, Square::C8, them)) continue;
             }
         }
 
-        // Apply state mutation
+        // Apply state mutation (Flips side to move internally)
         MoveExecutor::makeMove(pos, move, undo);
         
-        // Keep move if our king is completely unattacked post-execution
-        if (!inCheck(pos, us)) {
+        // Explicitly verify king safety using direct bitboard validation
+        bool kingSafe = true;
+        Piece myKing = (us == Color::White) ? Piece::WhiteKing : Piece::BlackKing;
+        Bitboard myKingBb = pos.getPieceBitboard(myKing);
+        
+        if (myKingBb) {
+            unsigned long kSq = 0;
+            #if defined(_MSC_VER)
+                _BitScanForward64(&kSq, myKingBb);
+            #else
+                kSq = __builtin_ctzll(myKingBb);
+            #endif
+            
+            // Query attacks using explicit opponent color parameter
+            if (isSquareAttacked(pos, static_cast<Square>(kSq), them)) {
+                kingSafe = false;
+            }
+        }
+
+        if (kingSafe) {
             legalMoves.push_back(move);
         }
 
