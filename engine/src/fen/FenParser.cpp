@@ -54,7 +54,7 @@ bool FenParser::parsePiecePlacement(std::string_view field, Position& pos) noexc
 
     for (char c : field) {
         if (c == '/') {
-            if (file != 8) return false; // Syntax violation: rank must contain exactly 8 files
+            if (file != 8) return false;
             --rank;
             file = 0;
             if (rank < 0) return false;

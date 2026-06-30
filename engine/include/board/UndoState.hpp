@@ -10,8 +10,12 @@ namespace Boson {
 struct UndoState {
     CastlingRights castlingRights;
     Square enPassantSquare;
-    uint16_t halfmoveClock;
+    int halfmoveClock;
     Piece capturedPiece;
+    Piece movingPiece;
+    Square castlingRookFrom{Square::None};
+    Square castlingRookTo{Square::None};
+    Piece castlingRookPiece{Piece::None};
 };
 
 } // namespace Boson

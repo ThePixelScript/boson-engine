@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include "Square.hpp"
+#include <string>
 
 namespace Boson {
 
@@ -43,6 +44,27 @@ public:
     constexpr bool isPromotion() const noexcept { return getFlags() == Flags::Promotion; }
 
     constexpr uint32_t getRawData() const noexcept { return m_data; }
+
+    // Add this inside the 'public' section of your Move class
+    constexpr bool operator==(const Move& rhs) const noexcept {
+        return m_data == rhs.m_data;
+    }
+
+    // Add this as well for debugging and DIVIDE output
+    std::string toString() const noexcept {
+        static const char* files = "abcdefgh";
+        static const char* ranks = "12345678";
+        std::string s = "";
+        s += files[static_cast<int>(getFromSquare()) % 8];
+        s += ranks[7 - (static_cast<int>(getFromSquare()) / 8)];
+        s += files[static_cast<int>(getToSquare()) % 8];
+        s += ranks[7 - (static_cast<int>(getToSquare()) / 8)];
+        if (isPromotion()) {
+            static const char* pieces = " qrbn";
+            s += pieces[static_cast<int>(getPromotionPiece())];
+        }
+        return s;
+    }
 
 private:
     uint32_t m_data; // Changed from uint16_t to uint32_t to stop bit truncation

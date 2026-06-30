@@ -10,6 +10,18 @@
 
 namespace Boson {
 
+struct BoardSnapshot {
+    std::array<Bitboard, 12> pieces{};
+    std::array<Bitboard, 3>  occupancy{};
+    Color sideToMove{Color::White};
+    Square enPassantSquare{Square::None};
+    CastlingRights castlingRights{CastlingRights::None};
+    uint16_t halfmoveClock{0};
+    uint16_t fullmoveNumber{1};
+    Square whiteKingSquare{Square::None};
+    Square blackKingSquare{Square::None};
+};
+
 class Position {
 public:
     Position() noexcept;
@@ -38,6 +50,9 @@ public:
     
     void clearState() noexcept;
     void updateOccupancy() noexcept;
+    void syncKingSquaresFromBitboards() noexcept;
+    BoardSnapshot captureSnapshot() const noexcept;
+    bool matchesSnapshot(const BoardSnapshot& snapshot) const noexcept;
     void debugPrintToConsole() const noexcept;
 
     // Getter for the current position's unique hash
@@ -47,7 +62,17 @@ public:
     void togglePieceHash(Square sq, Piece piece) noexcept;
     void toggleSideHash() noexcept;
 
+    // Add this to Position.hpp
+    Square getKingSquare(Color side) const noexcept {
+    return (side == Color::White) ? m_whiteKingSquare : m_blackKingSquare;
+}
+
+    void setKingSquare(Color color, Square sq) noexcept;
+
 private:
+    Square m_whiteKingSquare;
+    Square m_blackKingSquare;
+
     std::array<Bitboard, 12> m_pieces;
     std::array<Bitboard, 3>  m_occupancy; // [0] White, [1] Black, [2] Combined Total
     Color m_sideToMove;

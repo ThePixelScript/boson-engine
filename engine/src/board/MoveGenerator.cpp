@@ -3,6 +3,17 @@
 #include "board/MoveExecutor.hpp"
 #include <bit>
 #include <cmath>
+#include <cstdlib>
+#include <intrin.h>
+#include <string>
+#include <vector>
+#include <iostream>
+
+inline unsigned long countTrailingZeros(uint64_t v) {
+    unsigned long index = 0;
+    if (_BitScanForward64(&index, v)) return index;
+    return 64;
+}
 
 namespace Boson {
 
@@ -69,48 +80,48 @@ void MoveGenerator::initializeTables() noexcept {
 
 Bitboard MoveGenerator::calculateSlidingAttacks(Square sq, Bitboard occupancy, [[maybe_unused]] const std::array<Bitboard, 4>& rays, [[maybe_unused]] const std::array<int, 4>& shifts, bool isRook) noexcept {
     Bitboard attacks = 0ULL;
-    const int sqInt = static_cast<int>(sq);
-
-    // Dynamic step vectors matching internal ray boundaries perfectly
-    std::array<int, 4> stepOffsets = isRook ? std::array<int, 4>{8, -8, 1, -1} : std::array<int, 4>{9, 7, -7, -9};
+    const size_t sqIdx = static_cast<size_t>(sq);
 
     for (int dir = 0; dir < 4; ++dir) {
-        int currentSq = sqInt;
-        int step = stepOffsets[dir];
+        Bitboard ray = isRook ? s_rookRays[sqIdx][dir] : s_bishopRays[sqIdx][dir];
+        Bitboard blockers = ray & occupancy;
+        
+        if (blockers) {
+            unsigned long blockerSq = 0;
+            bool forward = isRook ? (dir == 0 || dir == 2) : (dir == 0 || dir == 1);
 
-        while (true) {
-            int nextSq = currentSq + step;
-            if (nextSq < 0 || nextSq >= 64) break;
-            
-            int currFile = currentSq % 8;
-            int nextFile = nextSq % 8;
-            
-            // Wrap-around shield: long-range slider movements can only shift 1 column per index step
-            if (std::abs(step) == 1 || std::abs(step) == 7 || std::abs(step) == 9) {
-                if (std::abs(currFile - nextFile) != 1) break;
+            if (forward) {
+                #if defined(_MSC_VER)
+                    _BitScanForward64(&blockerSq, blockers);
+                #else
+                    blockerSq = countTrailingZeros(blockers);
+                #endif
+            } else {
+                #if defined(_MSC_VER)
+                    _BitScanReverse64(&blockerSq, blockers);
+                #else
+                    blockerSq = 63 - __builtin_clzll(blockers);
+                #endif
             }
-
-            attacks |= (1ULL << nextSq);
-            if (occupancy & (1ULL << nextSq)) break;
-
-            currentSq = nextSq;
+            ray ^= isRook ? s_rookRays[blockerSq][dir] : s_bishopRays[blockerSq][dir];
         }
+        attacks |= ray;
     }
     return attacks;
 }
 
 Bitboard MoveGenerator::getRookAttacks(Square sq, Bitboard occupancy) noexcept {
-    constexpr std::array<int, 4> shifts = {1, -1, 1, -1};
-    return calculateSlidingAttacks(sq, occupancy, s_rookRays[static_cast<size_t>(sq)], shifts, true);
+    static constexpr std::array<int, 4> dummyShifts = {0, 0, 0, 0};
+    return calculateSlidingAttacks(sq, occupancy, s_rookRays[static_cast<size_t>(sq)], dummyShifts, true);
 }
 
 Bitboard MoveGenerator::getBishopAttacks(Square sq, Bitboard occupancy) noexcept {
-    constexpr std::array<int, 4> shifts = {1, 1, -1, -1};
-    return calculateSlidingAttacks(sq, occupancy, s_bishopRays[static_cast<size_t>(sq)], shifts, false);
+    static constexpr std::array<int, 4> dummyShifts = {0, 0, 0, 0};
+    return calculateSlidingAttacks(sq, occupancy, s_bishopRays[static_cast<size_t>(sq)], dummyShifts, false);
 }
 
 Bitboard MoveGenerator::getQueenAttacks(Square sq, Bitboard occupancy) noexcept {
-    return MoveGenerator::getRookAttacks(sq, occupancy) | MoveGenerator::getBishopAttacks(sq, occupancy);
+    return getRookAttacks(sq, occupancy) | getBishopAttacks(sq, occupancy);
 }
 
 void MoveGenerator::generateSlidingMoves(const Position& pos, MoveList& moves) noexcept {
@@ -131,7 +142,7 @@ void MoveGenerator::generateSlidingMoves(const Position& pos, MoveList& moves) n
             #if defined(_MSC_VER)
                 _BitScanForward64(&sq, pieceBb);
             #else
-                sq = __builtin_ctzll(pieceBb);
+                sq = countTrailingZeros(pieceBb);
             #endif
 
             Bitboard attacks = 0ULL;
@@ -145,7 +156,7 @@ void MoveGenerator::generateSlidingMoves(const Position& pos, MoveList& moves) n
                 #if defined(_MSC_VER)
                     _BitScanForward64(&targetSq, validMoves);
                 #else
-                    targetSq = __builtin_ctzll(validMoves);
+                    targetSq = countTrailingZeros(validMoves);
                 #endif
                 moves.push_back(Move(static_cast<Square>(sq), static_cast<Square>(targetSq)));
                 validMoves &= validMoves - 1;
@@ -160,13 +171,12 @@ void MoveGenerator::generateKingMoves(const Position& pos, MoveList& moves) noex
     const Bitboard friendlyOccupancy = pos.getColorOccupancy(us);
     const Bitboard totalOccupancy = pos.getTotalOccupancy();
     Bitboard king = pos.getPieceBitboard((us == Color::White) ? Piece::WhiteKing : Piece::BlackKing);
-    
     if (king) {
         unsigned long sq = 0;
         #if defined(_MSC_VER)
             _BitScanForward64(&sq, king);
         #else
-            sq = __builtin_ctzll(king);
+            sq = countTrailingZeros(king);
         #endif
         
         Bitboard validMoves = s_kingAttacks[sq] & ~friendlyOccupancy;
@@ -175,13 +185,12 @@ void MoveGenerator::generateKingMoves(const Position& pos, MoveList& moves) noex
             #if defined(_MSC_VER)
                 _BitScanForward64(&targetSq, validMoves);
             #else
-                targetSq = __builtin_ctzll(validMoves);
+                targetSq = countTrailingZeros(validMoves);
             #endif
             moves.push_back(Move(static_cast<Square>(sq), static_cast<Square>(targetSq)));
             validMoves &= validMoves - 1;
         }
 
-        // --- Castling Requirements Logic ---
         CastlingRights rights = pos.getCastlingRights();
         if (us == Color::White) {
             if (static_cast<bool>(rights & CastlingRights::WhiteOO)) {
@@ -197,12 +206,21 @@ void MoveGenerator::generateKingMoves(const Position& pos, MoveList& moves) noex
         } else {
             if (static_cast<bool>(rights & CastlingRights::BlackOO)) {
                 if (!(totalOccupancy & (Bitboards::getSquareBit(Square::F8) | Bitboards::getSquareBit(Square::G8)))) {
-                    moves.push_back(Move(Square::E8, Square::G8, Move::Flags::Castling));
+                    if (!isSquareAttacked(pos, Square::E8, Color::White) && 
+                        !isSquareAttacked(pos, Square::F8, Color::White) && 
+                        !isSquareAttacked(pos, Square::G8, Color::White)) {
+                        moves.push_back(Move(Square::E8, Square::G8, Move::Flags::Castling));
+                    }
                 }
             }
             if (static_cast<bool>(rights & CastlingRights::BlackOOO)) {
                 if (!(totalOccupancy & (Bitboards::getSquareBit(Square::D8) | Bitboards::getSquareBit(Square::C8) | Bitboards::getSquareBit(Square::B8)))) {
-                    moves.push_back(Move(Square::E8, Square::C8, Move::Flags::Castling));
+                    // Correct check for Queenside: E8, D8, C8
+                    if (!isSquareAttacked(pos, Square::E8, Color::White) && 
+                        !isSquareAttacked(pos, Square::D8, Color::White) && 
+                        !isSquareAttacked(pos, Square::C8, Color::White)) {
+                        moves.push_back(Move(Square::E8, Square::C8, Move::Flags::Castling));
+                    }
                 }
             }
         }
@@ -219,7 +237,7 @@ void MoveGenerator::generateKnightMoves(const Position& pos, MoveList& moves) no
         #if defined(_MSC_VER)
             _BitScanForward64(&sq, knights);
         #else
-            sq = __builtin_ctzll(knights);
+            sq = countTrailingZeros(knights);
         #endif
 
         Bitboard validMoves = s_knightAttacks[sq] & ~friendlyOccupancy;
@@ -228,7 +246,7 @@ void MoveGenerator::generateKnightMoves(const Position& pos, MoveList& moves) no
             #if defined(_MSC_VER)
                 _BitScanForward64(&targetSq, validMoves);
             #else
-                targetSq = __builtin_ctzll(validMoves);
+                targetSq = countTrailingZeros(validMoves);
             #endif
             moves.push_back(Move(static_cast<Square>(sq), static_cast<Square>(targetSq)));
             validMoves &= validMoves - 1;
@@ -239,47 +257,38 @@ void MoveGenerator::generateKnightMoves(const Position& pos, MoveList& moves) no
 
 void MoveGenerator::generatePawnMoves(const Position& pos, MoveList& moves) noexcept {
     const Color us = pos.getSideToMove();
+    const Bitboard pawns = pos.getPieceBitboard((us == Color::White) ? Piece::WhitePawn : Piece::BlackPawn);
     const Bitboard enemyOccupancy = pos.getColorOccupancy(!us);
     
     if (us == Color::White) {
-        Bitboard pawns = pos.getPieceBitboard(Piece::WhitePawn);
-        generatePawnPushes(pos, pawns, 8, 0x000000000000FF00ULL, moves);
+        generatePawnPushes(pos, pawns, 8, 0xFF00ULL, moves);
         generatePawnCaptures(pos, pawns, 8, enemyOccupancy, moves);
     } else {
-        Bitboard pawns = pos.getPieceBitboard(Piece::BlackPawn);
-        generatePawnPushes(pos, pawns, -8, 0x00FF000000000000ULL, moves);
+        generatePawnPushes(pos, pawns, -8, 0xFF000000000000ULL, moves);
         generatePawnCaptures(pos, pawns, -8, enemyOccupancy, moves);
     }
 }
 
 void MoveGenerator::generatePawnPushes(const Position& pos, Bitboard pawns, int direction, uint64_t startRankMask, MoveList& moves) noexcept {
     const Bitboard totalOccupancy = pos.getTotalOccupancy();
-    
     while (pawns) {
-        unsigned long sq = 0;
-        #if defined(_MSC_VER)
-            _BitScanForward64(&sq, pawns);
-        #else
-            sq = __builtin_ctzll(pawns);
-        #endif
-        
-        int singlePushTarget = static_cast<int>(sq) + direction;
-        Bitboard singlePushMask = 1ULL << singlePushTarget;
-        
-        if (!(totalOccupancy & singlePushMask)) {
-            if (singlePushTarget >= 56 || singlePushTarget <= 7) {
-                moves.push_back(Move(static_cast<Square>(sq), static_cast<Square>(singlePushTarget), Move::Flags::Promotion, Move::PromotionPiece::Queen));
-                moves.push_back(Move(static_cast<Square>(sq), static_cast<Square>(singlePushTarget), Move::Flags::Promotion, Move::PromotionPiece::Rook));
-                moves.push_back(Move(static_cast<Square>(sq), static_cast<Square>(singlePushTarget), Move::Flags::Promotion, Move::PromotionPiece::Bishop));
-                moves.push_back(Move(static_cast<Square>(sq), static_cast<Square>(singlePushTarget), Move::Flags::Promotion, Move::PromotionPiece::Knight));
+        unsigned long sq = countTrailingZeros(pawns); // Simplified for clarity
+        int target = static_cast<int>(sq) + direction;
+        Bitboard targetMask = 1ULL << target;
+
+        if (!(totalOccupancy & targetMask)) {
+            if (target >= 56 || target <= 7) {
+                // ALL 4 PROMOTIONS
+                moves.push_back(Move(static_cast<Square>(sq), static_cast<Square>(target), Move::Flags::Promotion, Move::PromotionPiece::Queen));
+                moves.push_back(Move(static_cast<Square>(sq), static_cast<Square>(target), Move::Flags::Promotion, Move::PromotionPiece::Rook));
+                moves.push_back(Move(static_cast<Square>(sq), static_cast<Square>(target), Move::Flags::Promotion, Move::PromotionPiece::Bishop));
+                moves.push_back(Move(static_cast<Square>(sq), static_cast<Square>(target), Move::Flags::Promotion, Move::PromotionPiece::Knight));
             } else {
-                moves.push_back(Move(static_cast<Square>(sq), static_cast<Square>(singlePushTarget)));
-                
+                moves.push_back(Move(static_cast<Square>(sq), static_cast<Square>(target)));
                 if ((1ULL << sq) & startRankMask) {
-                    int doublePushTarget = singlePushTarget + direction;
-                    if (!(totalOccupancy & (1ULL << doublePushTarget))) {
-                        moves.push_back(Move(static_cast<Square>(sq), static_cast<Square>(doublePushTarget), Move::Flags::DoublePawnPush));
-                    }
+                    int doubleTarget = target + direction;
+                    if (!(totalOccupancy & (1ULL << doubleTarget)))
+                        moves.push_back(Move(static_cast<Square>(sq), static_cast<Square>(doubleTarget), Move::Flags::DoublePawnPush));
                 }
             }
         }
@@ -288,49 +297,30 @@ void MoveGenerator::generatePawnPushes(const Position& pos, Bitboard pawns, int 
 }
 
 void MoveGenerator::generatePawnCaptures(const Position& pos, Bitboard pawns, int direction, Bitboard enemyOccupancy, MoveList& moves) noexcept {
-    constexpr Bitboard clearA = 0xFEFEFEFEFEFEFEFEULL;
-    constexpr Bitboard clearH = 0x7F7F7F7F7F7F7F7FULL;
     const Square epSquare = pos.getEnPassantSquare();
-    
     Bitboard targetMask = enemyOccupancy;
-    if (epSquare != Square::None) {
-        targetMask |= Bitboards::getSquareBit(epSquare);
-    }
+    if (epSquare != Square::None) targetMask |= Bitboards::getSquareBit(epSquare);
 
     while (pawns) {
-        unsigned long sq = 0;
-        #if defined(_MSC_VER)
-            _BitScanForward64(&sq, pawns);
-        #else
-            sq = __builtin_ctzll(pawns);
-        #endif
-        
+        unsigned long sq = countTrailingZeros(pawns);
         Bitboard pawnBit = 1ULL << sq;
+        // Directional masks (simplified)
+        Bitboard captures = ((direction == 8) ? ((pawnBit & 0xFEFEFEFEFEFEFEFEULL) << 7 | (pawnBit & 0x7F7F7F7F7F7F7F7FULL) << 9) 
+                                              : ((pawnBit & 0xFEFEFEFEFEFEFEFEULL) >> 9 | (pawnBit & 0x7F7F7F7F7F7F7F7FULL) >> 7)) & targetMask;
         
-        // Fully local lambda with explicit reference capturing to satisfy VS 2026 standards
-        auto checkAndEmitCapture = [&](int targetSquare, Bitboard edgeClearMask) {
-            if (pawnBit & edgeClearMask) {
-                if (targetMask & (1ULL << targetSquare)) {
-                    Move::Flags flag = (static_cast<Square>(targetSquare) == epSquare) ? Move::Flags::EnPassant : Move::Flags::None;
-                    
-                    if (targetSquare >= 56 || targetSquare <= 7) {
-                        moves.push_back(Move(static_cast<Square>(sq), static_cast<Square>(targetSquare), Move::Flags::Promotion, Move::PromotionPiece::Queen));
-                        moves.push_back(Move(static_cast<Square>(sq), static_cast<Square>(targetSquare), Move::Flags::Promotion, Move::PromotionPiece::Rook));
-                        moves.push_back(Move(static_cast<Square>(sq), static_cast<Square>(targetSquare), Move::Flags::Promotion, Move::PromotionPiece::Bishop));
-                        moves.push_back(Move(static_cast<Square>(sq), static_cast<Square>(targetSquare), Move::Flags::Promotion, Move::PromotionPiece::Knight));
-                    } else {
-                        moves.push_back(Move(static_cast<Square>(sq), static_cast<Square>(targetSquare), flag));
-                    }
-                }
+        while(captures) {
+            unsigned long target = countTrailingZeros(captures);
+            Move::Flags flag = (static_cast<Square>(target) == epSquare) ? Move::Flags::EnPassant : Move::Flags::None;
+            
+            if (target >= 56 || target <= 7) {
+                moves.push_back(Move(static_cast<Square>(sq), static_cast<Square>(target), Move::Flags::Promotion, Move::PromotionPiece::Queen));
+                moves.push_back(Move(static_cast<Square>(sq), static_cast<Square>(target), Move::Flags::Promotion, Move::PromotionPiece::Rook));
+                moves.push_back(Move(static_cast<Square>(sq), static_cast<Square>(target), Move::Flags::Promotion, Move::PromotionPiece::Bishop));
+                moves.push_back(Move(static_cast<Square>(sq), static_cast<Square>(target), Move::Flags::Promotion, Move::PromotionPiece::Knight));
+            } else {
+                moves.push_back(Move(static_cast<Square>(sq), static_cast<Square>(target), flag));
             }
-        };
-
-        if (direction == 8) {
-            checkAndEmitCapture(static_cast<int>(sq) + 7, clearA);
-            checkAndEmitCapture(static_cast<int>(sq) + 9, clearH);
-        } else {
-            checkAndEmitCapture(static_cast<int>(sq) - 9, clearA);
-            checkAndEmitCapture(static_cast<int>(sq) - 7, clearH);
+            captures &= captures - 1;
         }
         pawns &= pawns - 1;
     }
@@ -338,16 +328,17 @@ void MoveGenerator::generatePawnCaptures(const Position& pos, Bitboard pawns, in
 
 bool MoveGenerator::isSquareAttacked(const Position& pos, Square sq, Color attacker) noexcept {
     const Bitboard totalOcc = pos.getTotalOccupancy();
-    Bitboard pawns = pos.getPieceBitboard((attacker == Color::White) ? Piece::WhitePawn : Piece::BlackPawn);
-    int sqInt = static_cast<int>(sq);
+    const int sqInt = static_cast<int>(sq);
 
-    // Pristine file-aligned pawn ray intersections
+    Bitboard pawns = pos.getPieceBitboard((attacker == Color::White) ? Piece::WhitePawn : Piece::BlackPawn);
+    
+    // Mathematically corrected file bounds tracking
     if (attacker == Color::White) {
-        if (sqInt >= 9 && (sqInt % 8 != 0) && ((1ULL << (sqInt - 9)) & pawns)) return true;
-        if (sqInt >= 7 && (sqInt % 8 != 7) && ((1ULL << (sqInt - 7)) & pawns)) return true;
+        if (sqInt % 8 != 7 && sqInt >= 7 && ((1ULL << (sqInt - 7)) & pawns)) return true;
+        if (sqInt % 8 != 0 && sqInt >= 9 && ((1ULL << (sqInt - 9)) & pawns)) return true;
     } else {
-        if (sqInt <= 54 && (sqInt % 8 != 7) && ((1ULL << (sqInt + 9)) & pawns)) return true;
-        if (sqInt <= 56 && (sqInt % 8 != 0) && ((1ULL << (sqInt + 7)) & pawns)) return true;
+        if (sqInt % 8 != 7 && sqInt <= 54 && ((1ULL << (sqInt + 9)) & pawns)) return true;
+        if (sqInt % 8 != 0 && sqInt <= 56 && ((1ULL << (sqInt + 7)) & pawns)) return true;
     }
 
     Bitboard knights = pos.getPieceBitboard((attacker == Color::White) ? Piece::WhiteKnight : Piece::BlackKnight);
@@ -368,18 +359,11 @@ bool MoveGenerator::isSquareAttacked(const Position& pos, Square sq, Color attac
 }
 
 bool MoveGenerator::inCheck(const Position& pos, Color side) noexcept {
-    Piece targetKing = (side == Color::White) ? Piece::WhiteKing : Piece::BlackKing;
-    Bitboard kingBb = pos.getPieceBitboard(targetKing);
-    if (!kingBb) return false;
-
-    unsigned long kingSq = 0;
-    #if defined(_MSC_VER)
-        _BitScanForward64(&kingSq, kingBb);
-    #else
-        kingSq = __builtin_ctzll(kingBb);
-    #endif
-
-    return isSquareAttacked(pos, static_cast<Square>(kingSq), !side);
+    const Square kingSq = pos.getKingSquare(side);
+    if (kingSq == Square::None) {
+        return false;
+    }
+    return isSquareAttacked(pos, kingSq, side == Color::White ? Color::Black : Color::White);
 }
 
 void MoveGenerator::generateLegalMoves(Position& pos, MoveList& legalMoves) noexcept {
@@ -392,28 +376,36 @@ void MoveGenerator::generateLegalMoves(Position& pos, MoveList& legalMoves) noex
     generatePawnMoves(pos, pseudoMoves);
     generateSlidingMoves(pos, pseudoMoves);
 
-    for (size_t i = 0; i < pseudoMoves.size(); ++i) {
+    // Use standard indexing instead of range-based for to avoid missing iterators
+    for (int i = 0; i < pseudoMoves.size(); ++i) {
         const Move& move = pseudoMoves[i];
         UndoState undo;
 
-        // Strict, clean inline checks for Castling conditions before execution
         if (move.isCastling()) {
             if (inCheck(pos, us)) continue;
-            
+
             Square to = move.getToSquare();
-            if (to == Square::G1 && isSquareAttacked(pos, Square::F1, them)) continue;
-            if (to == Square::C1 && isSquareAttacked(pos, Square::D1, them)) continue;
-            if (to == Square::G8 && isSquareAttacked(pos, Square::F8, them)) continue;
-            if (to == Square::C8 && isSquareAttacked(pos, Square::D8, them)) continue;
+            if (to == Square::G1 && (isSquareAttacked(pos, Square::E1, them) || 
+                                    isSquareAttacked(pos, Square::F1, them) || 
+                                    isSquareAttacked(pos, Square::G1, them))) continue;
+            
+            if (to == Square::C1 && (isSquareAttacked(pos, Square::E1, them) || 
+                                    isSquareAttacked(pos, Square::D1, them) || 
+                                    isSquareAttacked(pos, Square::C1, them))) continue;
+                                    
+            if (to == Square::G8 && (isSquareAttacked(pos, Square::E8, them) || 
+                                    isSquareAttacked(pos, Square::F8, them) || 
+                                    isSquareAttacked(pos, Square::G8, them))) continue;
+                                    
+            if (to == Square::C8 && (isSquareAttacked(pos, Square::E8, them) || 
+                                    isSquareAttacked(pos, Square::D8, them) || 
+                                    isSquareAttacked(pos, Square::C8, them))) continue;
         }
 
         MoveExecutor::makeMove(pos, move, undo);
-        
-        // Let the uniform post-move check monitor capture validation and King safety!
         if (!inCheck(pos, us)) {
             legalMoves.push_back(move);
         }
-
         MoveExecutor::undoMove(pos, move, undo);
     }
 }
