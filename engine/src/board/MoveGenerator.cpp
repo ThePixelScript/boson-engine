@@ -103,8 +103,8 @@ Bitboard MoveGenerator::calculateSlidingAttacks(Square sq, Bitboard occupancy, [
                     blockerSq = 63 - __builtin_clzll(blockers);
                 #endif
             }
-            ray ^= isRook ? s_rookRays[blockerSq][dir] : s_bishopRays[blockerSq][dir];
-        }
+            Bitboard tail = isRook ? s_rookRays[blockerSq][dir] : s_bishopRays[blockerSq][dir];
+            ray &= ~tail;        }
         attacks |= ray;
     }
     return attacks;
@@ -327,6 +327,8 @@ void MoveGenerator::generatePawnCaptures(const Position& pos, Bitboard pawns, in
 }
 
 bool MoveGenerator::isSquareAttacked(const Position& pos, Square sq, Color attacker) noexcept {
+    initializeTables();
+    
     const Bitboard totalOcc = pos.getTotalOccupancy();
     const int sqInt = static_cast<int>(sq);
 
@@ -367,6 +369,8 @@ bool MoveGenerator::inCheck(const Position& pos, Color side) noexcept {
 }
 
 void MoveGenerator::generateLegalMoves(Position& pos, MoveList& legalMoves) noexcept {
+    initializeTables();
+    
     const Color us = pos.getSideToMove();
     const Color them = (us == Color::White) ? Color::Black : Color::White;
     

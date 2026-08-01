@@ -53,15 +53,25 @@ public:
     // Add this as well for debugging and DIVIDE output
     std::string toString() const noexcept {
         static const char* files = "abcdefgh";
-        static const char* ranks = "12345678";
+        static const char* ranks = "12345678"; // If A1 = 0
+
         std::string s = "";
-        s += files[static_cast<int>(getFromSquare()) % 8];
-        s += ranks[(static_cast<int>(getFromSquare()) / 8)];
-        s += files[static_cast<int>(getToSquare()) % 8];
-        s += ranks[(static_cast<int>(getToSquare()) / 8)];
+        int fromSq = static_cast<int>(getFromSquare());
+        int toSq   = static_cast<int>(getToSquare());
+
+        s += files[fromSq % 8];
+        s += ranks[fromSq / 8];
+        s += files[toSq % 8];
+        s += ranks[toSq / 8];
+
         if (isPromotion()) {
-            static const char* pieces = " qrbn";
-            s += pieces[static_cast<int>(getPromotionPiece())];
+            switch (getPromotionPiece()) {
+                case PromotionPiece::Queen:  s += 'q'; break;
+                case PromotionPiece::Rook:   s += 'r'; break;
+                case PromotionPiece::Bishop: s += 'b'; break;
+                case PromotionPiece::Knight: s += 'n'; break;
+                default: break;
+            }
         }
         return s;
     }

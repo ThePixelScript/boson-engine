@@ -36,7 +36,6 @@ void Position::clearState() noexcept {
 void Position::clearPieceBit(Square sq, Piece piece) noexcept {
     m_pieces[static_cast<size_t>(piece)] &= ~Bitboards::getSquareBit(sq);
     togglePieceHash(sq, piece);
-
     if (piece == Piece::WhiteKing && m_whiteKingSquare == sq) {
         m_whiteKingSquare = Square::None;
     } else if (piece == Piece::BlackKing && m_blackKingSquare == sq) {
@@ -47,7 +46,6 @@ void Position::clearPieceBit(Square sq, Piece piece) noexcept {
 void Position::setPieceBit(Square sq, Piece piece) noexcept {
     m_pieces[static_cast<size_t>(piece)] |= Bitboards::getSquareBit(sq);
     togglePieceHash(sq, piece);
-
     if (piece == Piece::WhiteKing) {
         m_whiteKingSquare = sq;
     } else if (piece == Piece::BlackKing) {
@@ -58,7 +56,7 @@ void Position::setPieceBit(Square sq, Piece piece) noexcept {
 void Position::setPiece(Square sq, Piece piece) noexcept {
     if (sq == Square::None || piece == Piece::None) return;
     m_pieces[static_cast<size_t>(piece)] |= Bitboards::getSquareBit(sq);
-    togglePieceHash(sq, piece); // Maintain parsing/builder updates dynamically
+    togglePieceHash(sq, piece);
 }
 
 void Position::togglePieceHash(Square sq, Piece piece) noexcept {
@@ -73,19 +71,16 @@ void Position::updateOccupancy() noexcept {
     m_occupancy[static_cast<size_t>(Color::White)] = 0ULL;
     m_occupancy[static_cast<size_t>(Color::Black)] = 0ULL;
 
-    // Use integer indices for the loop, then cast to Piece
     for (size_t p = static_cast<size_t>(Piece::WhitePawn); p <= static_cast<size_t>(Piece::WhiteKing); ++p) {
         m_occupancy[static_cast<size_t>(Color::White)] |= m_pieces[p];
     }
-    
     for (size_t p = static_cast<size_t>(Piece::BlackPawn); p <= static_cast<size_t>(Piece::BlackKing); ++p) {
         m_occupancy[static_cast<size_t>(Color::Black)] |= m_pieces[p];
     }
-    
+
     m_occupancy[static_cast<size_t>(Color::None)] = 
         m_occupancy[static_cast<size_t>(Color::White)] | 
         m_occupancy[static_cast<size_t>(Color::Black)];
-
     syncKingSquaresFromBitboards();
 }
 
@@ -128,7 +123,6 @@ void Position::debugPrintToConsole() const noexcept {
             Square currentSq = static_cast<Square>(rank * 8 + file);
             Bitboard currentMask = Bitboards::getSquareBit(currentSq);
             char activePieceSymbol = '.';
-
             if (m_pieces[static_cast<size_t>(Piece::WhitePawn)] & currentMask) activePieceSymbol = 'P';
             else if (m_pieces[static_cast<size_t>(Piece::WhiteKnight)] & currentMask) activePieceSymbol = 'N';
             else if (m_pieces[static_cast<size_t>(Piece::WhiteBishop)] & currentMask) activePieceSymbol = 'B';
@@ -141,7 +135,6 @@ void Position::debugPrintToConsole() const noexcept {
             else if (m_pieces[static_cast<size_t>(Piece::BlackRook)] & currentMask) activePieceSymbol = 'r';
             else if (m_pieces[static_cast<size_t>(Piece::BlackQueen)] & currentMask) activePieceSymbol = 'q';
             else if (m_pieces[static_cast<size_t>(Piece::BlackKing)] & currentMask) activePieceSymbol = 'k';
-
             std::cout << " " << activePieceSymbol << " |";
         }
         std::cout << "\n +---+---+---+---+---+---+---+──+\n";
@@ -153,6 +146,22 @@ void Position::debugPrintToConsole() const noexcept {
 void Position::setKingSquare(Color color, Square sq) noexcept {
     if (color == Color::White) m_whiteKingSquare = sq;
     else m_blackKingSquare = sq;
+}
+
+void Position::setEnPassantSquare(Square sq) noexcept {
+    if (m_enPassantSquare != Square::None) {
+        m_hashKey ^= Zobrist::s_enPassant[static_cast<size_t>(m_enPassantSquare) % 8];
+    }
+    m_enPassantSquare = sq;
+    if (m_enPassantSquare != Square::None) {
+        m_hashKey ^= Zobrist::s_enPassant[static_cast<size_t>(m_enPassantSquare) % 8];
+    }
+}
+
+void Position::setCastlingRights(CastlingRights rights) noexcept {
+    m_hashKey ^= Zobrist::s_castling[static_cast<size_t>(m_castlingRights)];
+    m_castlingRights = rights;
+    m_hashKey ^= Zobrist::s_castling[static_cast<size_t>(m_castlingRights)];
 }
 
 } // namespace Boson

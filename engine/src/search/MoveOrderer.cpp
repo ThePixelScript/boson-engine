@@ -9,7 +9,6 @@
 
 namespace Boson {
 
-// 1. Instantiate the static MVV_LVA matrix member declared in the class header
 const std::array<std::array<int, 6>, 6> MoveOrderer::MVV_LVA = {{
     {105, 104, 103, 102, 101, 100}, // Victim: Pawn
     {205, 204, 203, 202, 201, 200}, // Victim: Knight
@@ -19,7 +18,6 @@ const std::array<std::array<int, 6>, 6> MoveOrderer::MVV_LVA = {{
     {605, 604, 603, 602, 601, 600}  // Victim: King
 }};
 
-// 2. Define the static member helper functions properly qualified under MoveOrderer::
 int MoveOrderer::getPieceIndex(Piece p) noexcept {
     if (p == Piece::None) return 0;
     return static_cast<int>(p) % 6;
@@ -27,9 +25,9 @@ int MoveOrderer::getPieceIndex(Piece p) noexcept {
 
 Piece MoveOrderer::findPieceAtSquare(const Position& pos, Square sq) noexcept {
     if (sq == Square::None) return Piece::None;
-    const Bitboard sqMask = Bitboards::getSquareBit(sq);
+    const Bitboard squareMask = Bitboards::getSquareBit(sq);
     for (int p = 0; p < 12; ++p) {
-        if (pos.getPieceBitboard(static_cast<Piece>(p)) & sqMask) {
+        if (pos.getPieceBitboard(static_cast<Piece>(p)) & squareMask) {
             return static_cast<Piece>(p);
         }
     }
@@ -61,7 +59,6 @@ void MoveOrderer::scoreAndSortMoves(
             Piece attacker = findPieceAtSquare(pos, m.getFromSquare());
             Piece victim = findPieceAtSquare(pos, m.getToSquare());
 
-            // EP destination is empty on the board; assign pawn victim explicitly.
             if (m.isEnPassant() ||
                 (m.getToSquare() == pos.getEnPassantSquare() && pos.getEnPassantSquare() != Square::None)) {
                 victim = (pos.getSideToMove() == Color::White) ? Piece::BlackPawn : Piece::WhitePawn;
@@ -70,11 +67,17 @@ void MoveOrderer::scoreAndSortMoves(
             if (victim != Piece::None) {
                 int aIdx = getPieceIndex(attacker);
                 int vIdx = getPieceIndex(victim);
+                
+                // Base MVV-LVA score ensures captures are strictly above quiet moves
                 int mvvLvaScore = SCORE_CAPTURES + MVV_LVA[vIdx][aIdx];
                 int seeValue = SEE::evaluate(const_cast<Position&>(pos), m.getFromSquare(), m.getToSquare());
 
-                if (seeValue < 0) score = SCORE_QUIET - 10000 + seeValue;
-                else             score = mvvLvaScore;
+                // Only demote captures that lose heavy material (e.g., Q x guarded Pawn)
+                if (seeValue < -400) {
+                    score = SCORE_QUIET - 5000 + seeValue;
+                } else {
+                    score = mvvLvaScore; // Keep B x N (b5c6) prioritized!
+                }
             }
             else if (m.isPromotion()) {
                 score = SCORE_PROMOTIONS;
@@ -87,20 +90,26 @@ void MoveOrderer::scoreAndSortMoves(
                         score = SCORE_KILLER_2;
                     }
                     else {
-                        int conthistScore = Search::getContHist().getScore(attacker, prevMove.getToSquare(), m.getToSquare());
+                        if (cmhMove.getRawData() != 0 && m.getRawData() == cmhMove.getRawData()) {
+                            stats.cmhHits++;
+                            score = SCORE_KILLER_2 - 20;
+                        }
 
+                        int conthistScore = Search::getContHist().getScore(attacker, prevMove.getToSquare(), m.getToSquare());
                         if (conthistScore > 0) {
                             stats.conthistHits++;
-                            score = SCORE_KILLER_2 - 50 + std::min(49, conthistScore / 100);
-                        }
-                        else if (cmhMove.getRawData() != 0 && m.getRawData() == cmhMove.getRawData()) {
-                            stats.cmhHits++;
-                            score = SCORE_KILLER_2 - 100;
+                            score = std::max(score, SCORE_KILLER_2 - 50 + std::min(49, conthistScore / 100));
                         }
                         else if (attacker != Piece::None) {
                             size_t pIdx = static_cast<size_t>(attacker);
                             size_t toIdx = static_cast<size_t>(m.getToSquare());
-                            score = static_cast<int>(historyTable[pIdx][toIdx]);
+                            score = SCORE_QUIET + static_cast<int>(historyTable[pIdx][toIdx]);
+
+                            if (attacker == Piece::WhiteKing || attacker == Piece::BlackKing) {
+                                if (!m.isCastling()) {
+                                    score -= 2000;
+                                }
+                            }
                         }
                     }
                 }

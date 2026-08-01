@@ -14,12 +14,12 @@ enum class TTNodeType : uint8_t {
 };
 
 struct TTEntry {
-    uint64_t key;
+    uint64_t key = 0;
     Move bestMove;
-    int16_t score;
-    int16_t depth;
-    uint8_t flag; // 0 = Exact, 1 = Lower Bound, 2 = Upper Bound
-    uint8_t generation;
+    int16_t score = 0;
+    int8_t depth = 0;
+    TTNodeType type = TTNodeType::Exact;
+    uint8_t generation = 0;
 };
 
 class TranspositionTable {
@@ -38,8 +38,7 @@ public:
 
 private:
     std::vector<TTEntry> m_table;
-    size_t m_entryCount;
-    size_t m_mask;
+    size_t m_capacity = 0;
 
     // Diagnostic Counters
     uint64_t m_probes = 0;

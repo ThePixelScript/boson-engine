@@ -8,12 +8,11 @@ namespace Boson {
 
 class LMRPolicy {
 public:
-    // Initialize a logarithmic reduction lookup matrix for lightning-fast hot-path queries
     static void initializeTable() noexcept {
         for (int depth = 0; depth < 64; ++depth) {
             for (int moveCount = 0; moveCount < 64; ++moveCount) {
                 if (depth >= 3 && moveCount >= 4) {
-                    // Classic base logarithmic scaling policy: log(depth) * log(moveCount) / 1.95
+                    // Classic base logarithmic scaling policy
                     double reduction = 0.5 + std::log(depth) * std::log(moveCount) / 1.95;
                     s_reductionTable[depth][moveCount] = std::min(depth - 1, static_cast<int>(reduction));
                 } else {
@@ -24,12 +23,19 @@ public:
     }
 
     [[nodiscard]] static int getReduction(int depth, int moveCount) noexcept {
-        if (depth >= 64)  depth = 63;
+        // Guarantee initialized on first call if not already done
+        [[unlikely]] if (!s_initialized) {
+            initializeTable();
+            s_initialized = true;
+        }
+
+        if (depth >= 64) depth = 63;
         if (moveCount >= 64) moveCount = 63;
         return s_reductionTable[depth][moveCount];
     }
 
 private:
+    static inline bool s_initialized = false;
     static inline int s_reductionTable[64][64] = {};
 };
 

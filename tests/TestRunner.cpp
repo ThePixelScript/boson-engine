@@ -5,85 +5,97 @@
 #include <sstream>
 #include "fen/FenParser.hpp"
 #include "board/Position.hpp"
+#include "board/MoveGenerator.hpp"
 #include "search/Search.hpp"
 #include "search/SearchController.hpp"
 #include "search/Zobrist.hpp"
 
-// We temporarily define s_tt as public or bypass access controls for the test harness.
-// To bypass the 'private' check cleanly without changing your main header, 
-// we can use a standard macro trick or remember to move s_tt to public in Search.hpp.
-#define private public 
-#include "search/Search.hpp"
-#undef private
-
 namespace Boson {
 
-void runTacticalSuite(const std::string& filePath) {
-    std::ifstream file(filePath);
+struct TestCase {
+    std::string fen;
+    std::string expectedMove;
+};
+
+std::vector<TestCase> loadEPD(const std::string& filepath) {
+    std::vector<TestCase> testCases;
+    std::ifstream file(filepath);
     if (!file.is_open()) {
-        std::cerr << "Failed to open test suite: " << filePath << "\n";
-        return;
+        std::cerr << "Failed to open EPD file: " << filepath << std::endl;
+        return testCases;
     }
 
     std::string line;
-    int testCount = 0;
-    int passedTactics = 0;
-
-    std::cout << "\n=== Executing Tactical Suite: " << filePath << " ===\n";
-
     while (std::getline(file, line)) {
-        if (line.empty() || line[0] == '#') continue;
+        if (line.empty()) continue;
 
         size_t bmPos = line.find("bm ");
         if (bmPos == std::string::npos) continue;
 
-        testCount++; // Increments cleanly for every valid position
+        std::string fen = line.substr(0, bmPos);
+        
+        size_t moveStart = bmPos + 3;
+        size_t moveEnd = line.find(';', moveStart);
+        std::string expectedMove = line.substr(moveStart, moveEnd - moveStart);
 
-        std::string fen = line.substr(0, bmPos - 1);
-        std::string bestMoveExpected = line.substr(bmPos + 3);
-        if (!bestMoveExpected.empty() && bestMoveExpected.back() == ';') {
-            bestMoveExpected.pop_back();
-        }
+        while (!fen.empty() && fen.back() == ' ') fen.pop_back();
+        while (!expectedMove.empty() && expectedMove.back() == ' ') expectedMove.pop_back();
 
-        auto parseResult = FenParser::parse(fen);
+        testCases.push_back({fen, expectedMove});
+    }
+    return testCases;
+}
+
+int runTacticalSuite() {
+    Zobrist::initialize();
+    MoveGenerator::initializeTables();
+
+    std::string epdPath = "../tests/tactical/wac.epd";
+    auto testCases = loadEPD(epdPath);
+
+    if (testCases.empty()) {
+        std::cout << "No test cases loaded from " << epdPath << "\n";
+        return 1;
+    }
+
+    std::cout << "\n=== Executing Tactical Suite: " << epdPath << " ===\n";
+    int solvedCount = 0;
+
+    for (size_t i = 0; i < testCases.size(); ++i) {
+        std::cout << "Running Pos #" << (i + 1) << "...\n";
+        auto parseResult = FenParser::parse(testCases[i].fen);
         if (!parseResult) {
-            std::cerr << "FAIL: Test #" << testCount << " malformed FEN string.\n";
+            std::cout << "FAIL: Invalid FEN on position #" << (i + 1) << "\n";
             continue;
         }
 
         Position pos = parseResult.value();
-        std::cout << "Running Pos #" << testCount << "...\n";
+        Search::runSearch(pos, 12);
 
-        Search::runSearch(pos, 10);
-
+        // ✅ Extract the best move (first token) from stats.pvString
         auto& stats = SearchController::getInstance().getStats();
-
-        std::string bosonMoveStr = "none";
+        std::string foundMoveStr = "";
+        
         if (!stats.pvString.empty()) {
-            std::vector<std::string> pvMoves;
-            std::string tmp;
             std::stringstream ss(stats.pvString);
-            while (ss >> tmp) pvMoves.push_back(tmp);
-            if (!pvMoves.empty()) {
-                bosonMoveStr = pvMoves[0]; 
-            }
+            ss >> foundMoveStr; // Extracts the first move in the PV
         }
 
-        if (bosonMoveStr == bestMoveExpected) {
-            passedTactics++;
-            std::cout << "PASS: Found " << bosonMoveStr << "\n";
+        if (foundMoveStr == testCases[i].expectedMove) {
+            std::cout << "PASS: " << foundMoveStr << "\n";
+            solvedCount++;
         } else {
-            std::cout << "FAIL: Expected " << bestMoveExpected << ", Found [" << bosonMoveStr << "]\n";
+            std::cout << "FAIL: Expected " << testCases[i].expectedMove << ", Found [" << foundMoveStr << "]\n";
         }
+        std::cout << "==================================================\n";
     }
 
-    std::cout << "\nTactical Accuracy: " << passedTactics << "/" << testCount << " Solved.\n";
+    std::cout << "\nTactical Accuracy: " << solvedCount << "/" << testCases.size() << " Solved.\n";
+    return 0;
 }
 
 } // namespace Boson
 
 int main() {
-    Boson::Zobrist::initialize();
-    Boson::runTacticalSuite("../tests/tactical/wac.epd");
-    return 0;
+    return Boson::runTacticalSuite();
 }

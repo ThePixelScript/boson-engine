@@ -61,37 +61,81 @@ int Search::evaluate(const Position& pos) noexcept {
 int Search::quiescence(Position& pos, int alpha, int beta, int ply) noexcept {
     auto& controller = SearchController::getInstance();
     auto& stats = controller.getStats();
-
     stats.qNodes++;
+
     if (stats.qNodes % NODE_CHECK_PERIOD == 0) {
         controller.checkTime();
     }
     if (controller.shouldStop()) return 0;
 
-    int standPat = evaluate(pos); 
+    const bool inCheck = MoveGenerator::inCheck(pos, pos.getSideToMove());
 
-    if (standPat >= beta) return beta;
-    if (standPat > alpha) alpha = standPat;
+    if (!inCheck) {
+        int standPat = evaluate(pos);
+        if (standPat >= beta) return beta;
+        if (standPat > alpha) alpha = standPat;
+    }
 
-    MoveList tacticalMoves;
-    MoveGenerator::generateTacticalMoves(pos, tacticalMoves);
-    
-    static const std::array<std::array<Move, 2>, 64> emptyKillers{};
-    static const std::array<std::array<uint32_t, 64>, 12> emptyHistory{};
-    MoveOrderer::scoreAndSortMoves(pos, tacticalMoves, Move(), emptyKillers, emptyHistory, ply, Move());
+    MoveList moves;
+    if (inCheck) {
+        MoveGenerator::generateLegalMoves(pos, moves);
+    } else {
+        MoveGenerator::generateTacticalMoves(pos, moves);
+    }
 
-    for (size_t i = 0; i < tacticalMoves.size(); ++i) {
+    auto getPieceValue = [](Piece p) -> int {
+        switch (p) {
+            case Piece::WhitePawn:   case Piece::BlackPawn:   return 100;
+            case Piece::WhiteKnight: case Piece::BlackKnight: return 300;
+            case Piece::WhiteBishop: case Piece::BlackBishop: return 325;
+            case Piece::WhiteRook:   case Piece::BlackRook:   return 500;
+            case Piece::WhiteQueen:  case Piece::BlackQueen:  return 900;
+            case Piece::WhiteKing:   case Piece::BlackKing:   return 20000;
+            default: return 0;
+        }
+    };
+
+    for (size_t i = 0; i < moves.size(); ++i) {
+        size_t bestIdx = i;
+        int maxVictim = -1;
+
+        for (size_t j = i; j < moves.size(); ++j) {
+            int victimValue = 0;
+            Bitboard targetBit = Bitboards::getSquareBit(moves[j].getToSquare());
+
+            for (size_t p = 0; p < 12; ++p) {
+                if (pos.getPieceBitboard(static_cast<Piece>(p)) & targetBit) {
+                    victimValue = getPieceValue(static_cast<Piece>(p));
+                    break;
+                }
+            }
+
+            if (victimValue > maxVictim) {
+                maxVictim = victimValue;
+                bestIdx = j;
+            }
+        }
+
+        if (bestIdx != i) {
+            std::swap(moves[i], moves[bestIdx]);
+        }
+    }
+
+    for (size_t i = 0; i < moves.size(); ++i) {
+        if (!inCheck && !moves[i].isPromotion()) {
+            if (SEE::evaluate(pos, moves[i].getFromSquare(), moves[i].getToSquare()) < -200) {
+                continue;
+            }
+        }
+
         UndoState undo;
-        MoveExecutor::makeMove(pos, tacticalMoves[i], undo);
-        
+        MoveExecutor::makeMove(pos, moves[i], undo);
         int moveScore = -quiescence(pos, -beta, -alpha, ply + 1);
-        
-        MoveExecutor::undoMove(pos, tacticalMoves[i], undo);
+        MoveExecutor::undoMove(pos, moves[i], undo);
 
         if (controller.shouldStop()) return 0;
-
         if (moveScore >= beta) return beta;
-        if (moveScore > alpha) alpha = moveScore; 
+        if (moveScore > alpha) alpha = moveScore;
     }
 
     return alpha;
@@ -122,16 +166,19 @@ int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLi
     int ttDepth = 0;
     TTNodeType ttType;
 
-    if (s_tt.probe(pos.getHashKey(), ttScore, ttMove, ttDepth, ttType, alpha, beta)) {
+    bool isPvNode = (beta - alpha > 1);
+
+    if (!isPvNode && s_tt.probe(pos.getHashKey(), ttScore, ttMove, ttDepth, ttType, alpha, beta)) {
         if (ttDepth >= depth) {
             stats.ttHits++;
             return ttScore;
         }
     }
 
-    // Null Move Pruning
+    // Null Move Pruning Safeguard: Only execute if position is statically safe
+    int staticEval = evaluate(pos);
     constexpr int R = 2; 
-    if (allowNull && depth >= 3 && !inCheck) {
+    if (allowNull && depth >= 3 && !inCheck && staticEval >= beta) {
         Color side = pos.getSideToMove();
         Bitboard nonPawnMaterial = (side == Color::White) 
             ? (pos.getPieceBitboard(Piece::WhiteKnight) | pos.getPieceBitboard(Piece::WhiteBishop) |
@@ -159,7 +206,6 @@ int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLi
             if (nullScore >= beta) {
                 stats.nullCutoffs++;
                 stats.betaCutoffs++;
-                s_tt.store(pos.getHashKey(), beta, Move(), depth, TTNodeType::LowerBound, 0);
                 return beta; 
             } else {
                 stats.nullFailures++;
@@ -177,7 +223,6 @@ int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLi
         return 0; 
     }
 
-    // 1. Initial score assignment and complete sorting pass
     MoveOrderer::scoreAndSortMoves(pos, legalMoves, ttMove, s_killerMoves, s_historyTable, ply, prevMove);
 
     int bestScore = -INF;
@@ -198,10 +243,13 @@ int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLi
         MoveExecutor::makeMove(pos, legalMoves[i], undo);
         movesSearched++;
 
+        bool givesCheck = MoveGenerator::inCheck(pos, pos.getSideToMove());
+
         int score = -INF;
         int reduction = 0;
 
-        if (depth >= 3 && movesSearched >= 4 && !inCheck && !isCaptureMove && !isPromotionMove) {
+        // LMR Guard: Do not reduce moves that give check
+        if (depth >= 3 && movesSearched >= 4 && !inCheck && !isCaptureMove && !isPromotionMove && !givesCheck) {
             reduction = LMRPolicy::getReduction(depth, movesSearched);
             if (reduction > 0) {
                 stats.lmrAttempts++;
@@ -284,12 +332,14 @@ int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLi
     else if (bestScore >= beta)      storeType = TTNodeType::LowerBound;
 
     if (storeType == TTNodeType::Exact && !inCheck && depth >= 4) {
-        int staticEval = evaluate(pos);
+        int evalVal = evaluate(pos);
         stats.corrUpdates++;
-        Evaluator::getCorrHist().updateCorrection(pos.getSideToMove(), pos.getHashKey(), depth, bestScore, staticEval);
+        Evaluator::getCorrHist().updateCorrection(pos.getSideToMove(), pos.getHashKey(), depth, bestScore, evalVal);
     }
 
-    s_tt.store(pos.getHashKey(), bestScore, bestMove, depth, storeType, 0);
+    Move moveToStore = (storeType == TTNodeType::UpperBound) ? Move() : bestMove;
+    s_tt.store(pos.getHashKey(), bestScore, moveToStore, depth, storeType, 0);
+
     return bestScore;
 }
 
@@ -297,7 +347,6 @@ int Search::runSearch(Position& pos, int maxDepth) noexcept {
     auto& controller = SearchController::getInstance();
     auto& stats = controller.getStats(); 
 
-    // ✅ FIXED: Safely reset individual counters while handling std::string cleanly
     stats.nodes = 0;
     stats.qNodes = 0;
     stats.ttHits = 0;
@@ -322,7 +371,6 @@ int Search::runSearch(Position& pos, int maxDepth) noexcept {
     stats.completedDepth = 0;
     stats.elapsedTimeMs = 0;
     
-    // Reset the string containers using native class clear implementations
     stats.pvString.clear(); 
 
     s_tt.clear();
@@ -406,12 +454,7 @@ int Search::runSearch(Position& pos, int maxDepth) noexcept {
 
         std::string currentPvStr = "";
         for (size_t i = 0; i < stablePv.count; ++i) {
-            int from = static_cast<int>(stablePv.moves[i].getFromSquare());
-            int to = static_cast<int>(stablePv.moves[i].getToSquare());
-            currentPvStr += " " + std::string(1, static_cast<char>('a' + (from % 8))) + 
-                                  std::string(1, static_cast<char>('1' + (from / 8))) +
-                                  std::string(1, static_cast<char>('a' + (to % 8))) + 
-                                  std::string(1, static_cast<char>('1' + (to / 8)));
+            currentPvStr += " " + stablePv.moves[i].toString();
         }
         stats.pvString = currentPvStr;
 

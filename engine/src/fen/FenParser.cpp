@@ -25,7 +25,7 @@ std::expected<Position, ParseError> FenParser::parse(std::string_view fen) noexc
     std::vector<std::string_view> fields;
     size_t start = 0;
     size_t end = fen.find(' ');
-    
+
     while (end != std::string_view::npos) {
         fields.push_back(fen.substr(start, end - start));
         start = end + 1;
@@ -33,7 +33,8 @@ std::expected<Position, ParseError> FenParser::parse(std::string_view fen) noexc
     }
     fields.push_back(fen.substr(start));
 
-    if (fields.size() != 6) {
+    // ✅ Accept EPD (4 fields) or full FEN (5-6 fields)
+    if (fields.size() < 4 || fields.size() > 6) {
         return std::unexpected(ParseError::MalformedFieldCount);
     }
 
@@ -41,8 +42,16 @@ std::expected<Position, ParseError> FenParser::parse(std::string_view fen) noexc
     if (!parseActiveColor(fields[1], pos))     return std::unexpected(ParseError::InvalidActiveColor);
     if (!parseCastlingRights(fields[2], pos))  return std::unexpected(ParseError::InvalidCastlingRights);
     if (!parseEnPassant(fields[3], pos))       return std::unexpected(ParseError::InvalidEnPassantSquare);
-    if (!parseHalfmoveClock(fields[4], pos))   return std::unexpected(ParseError::InvalidHalfmoveClock);
-    if (!parseFullmoveNumber(fields[5], pos))  return std::unexpected(ParseError::InvalidFullmoveNumber);
+
+    // Parse halfmove clock if available (field 5)
+    if (fields.size() >= 5) {
+        if (!parseHalfmoveClock(fields[4], pos)) return std::unexpected(ParseError::InvalidHalfmoveClock);
+    }
+
+    // Parse fullmove number if available (field 6)
+    if (fields.size() == 6) {
+        if (!parseFullmoveNumber(fields[5], pos)) return std::unexpected(ParseError::InvalidFullmoveNumber);
+    }
 
     pos.updateOccupancy();
     return pos;
