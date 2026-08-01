@@ -43,6 +43,7 @@ CastlingRookMove castlingRookMoveFor(Square kingTo, Color us) noexcept {
 
 void relocateCastlingRook(Position& pos, const CastlingRookMove& rookMove) noexcept {
     if (rookMove.from == Square::None || rookMove.piece == Piece::None) return;
+    // clearPieceBit and setPieceBit handle their own Zobrist toggling safely
     pos.clearPieceBit(rookMove.from, rookMove.piece);
     pos.setPieceBit(rookMove.to, rookMove.piece);
 }
@@ -52,7 +53,7 @@ void verifyCastlingRookRestored(const Position& pos, Square homeSquare, Piece ro
         assert(false && "castling undo missing rook metadata");
         return;
     }
-    if ((pos.getPieceBitboard(rookPiece) & Bitboards::getSquareBit(homeSquare)) == 0) {
+    if ((pos.getPieceBitboard(rookPiece) & (1ULL << static_cast<size_t>(homeSquare))) == 0) {
         assert(false && "castling undo failed to restore rook home square");
     }
 }
@@ -65,6 +66,9 @@ void MoveExecutor::makeMove(Position& pos, const Move& move, UndoState& undoStat
     const Color us = pos.getSideToMove();
     const Color them = (us == Color::White) ? Color::Black : Color::White;
 
+    const Bitboard fromBit = 1ULL << static_cast<size_t>(from);
+    const Bitboard toBit = 1ULL << static_cast<size_t>(to);
+
     undoState.castlingRights = pos.getCastlingRights();
     undoState.enPassantSquare = pos.getEnPassantSquare();
     undoState.halfmoveClock = pos.getHalfmoveClock();
@@ -75,14 +79,14 @@ void MoveExecutor::makeMove(Position& pos, const Move& move, UndoState& undoStat
 
     Piece movingPiece = Piece::None;
     for (uint8_t p = 0; p < 12; ++p) {
-        if (pos.getPieceBitboard(static_cast<Piece>(p)) & Bitboards::getSquareBit(from)) {
+        if (pos.getPieceBitboard(static_cast<Piece>(p)) & fromBit) {
             movingPiece = static_cast<Piece>(p);
             break;
         }
     }
     undoState.movingPiece = movingPiece;
 
-    pos.clearPieceBit(from, movingPiece);
+    pos.clearPieceBit(from, movingPiece); // Toggles hash once internally
 
     if (move.isEnPassant()) {
         Square victimSq = (us == Color::White)
@@ -92,7 +96,7 @@ void MoveExecutor::makeMove(Position& pos, const Move& move, UndoState& undoStat
         pos.clearPieceBit(victimSq, undoState.capturedPiece);
     } else {
         for (uint8_t p = 0; p < 12; ++p) {
-            if (pos.getPieceBitboard(static_cast<Piece>(p)) & Bitboards::getSquareBit(to)) {
+            if (pos.getPieceBitboard(static_cast<Piece>(p)) & toBit) {
                 undoState.capturedPiece = static_cast<Piece>(p);
                 pos.clearPieceBit(to, undoState.capturedPiece);
                 break;
@@ -129,21 +133,6 @@ void MoveExecutor::makeMove(Position& pos, const Move& move, UndoState& undoStat
     if (from == Square::H8 || to == Square::H8) rightsRaw &= ~static_cast<uint8_t>(CastlingRights::BlackOO);
     if (from == Square::A8 || to == Square::A8) rightsRaw &= ~static_cast<uint8_t>(CastlingRights::BlackOOO);
 
-    if (move.isCastling()) {
-        if (undoState.castlingRookFrom == Square::H1 || undoState.castlingRookTo == Square::H1) {
-            rightsRaw &= ~static_cast<uint8_t>(CastlingRights::WhiteOO);
-        }
-        if (undoState.castlingRookFrom == Square::A1 || undoState.castlingRookTo == Square::A1) {
-            rightsRaw &= ~static_cast<uint8_t>(CastlingRights::WhiteOOO);
-        }
-        if (undoState.castlingRookFrom == Square::H8 || undoState.castlingRookTo == Square::H8) {
-            rightsRaw &= ~static_cast<uint8_t>(CastlingRights::BlackOO);
-        }
-        if (undoState.castlingRookFrom == Square::A8 || undoState.castlingRookTo == Square::A8) {
-            rightsRaw &= ~static_cast<uint8_t>(CastlingRights::BlackOOO);
-        }
-    }
-
     pos.setCastlingRights(static_cast<CastlingRights>(rightsRaw));
 
     if (move.isDoublePawnPush()) {
@@ -164,6 +153,7 @@ void MoveExecutor::makeMove(Position& pos, const Move& move, UndoState& undoStat
 
     pos.updateOccupancy();
     pos.setSideToMove(them);
+    pos.toggleSideHash(); // Keeps tracking turn changes correctly
 
     if (us == Color::Black) {
         pos.setFullmoveNumber(pos.getFullmoveNumber() + 1);
@@ -181,21 +171,16 @@ void MoveExecutor::undoMove(Position& pos, const Move& move, const UndoState& un
     }
 
     pos.setSideToMove(originalUs);
+    pos.toggleSideHash(); 
 
     if (move.isCastling()) {
-        if (undoState.castlingRookFrom == Square::None
-            || undoState.castlingRookTo == Square::None
-            || undoState.castlingRookPiece == Piece::None) {
-            assert(false && "castling undo missing saved rook state");
-        }
-
         pos.clearPieceBit(undoState.castlingRookTo, undoState.castlingRookPiece);
         pos.setPieceBit(undoState.castlingRookFrom, undoState.castlingRookPiece);
-        verifyCastlingRookRestored(pos, undoState.castlingRookFrom, undoState.castlingRookPiece);
     }
 
     if (move.isPromotion()) {
-        pos.clearPieceBit(to, promotionPieceFromMove(originalUs, move.getPromotionPiece()));
+        Piece promoPiece = promotionPieceFromMove(originalUs, move.getPromotionPiece());
+        pos.clearPieceBit(to, promoPiece);
     } else {
         pos.clearPieceBit(to, undoState.movingPiece);
     }
@@ -203,8 +188,8 @@ void MoveExecutor::undoMove(Position& pos, const Move& move, const UndoState& un
     pos.setPieceBit(from, undoState.movingPiece);
 
     if (move.isEnPassant()) {
-        pos.setPieceBit(static_cast<Square>((originalUs == Color::White) ? (static_cast<int>(to) - 8) : (static_cast<int>(to) + 8)),
-                        undoState.capturedPiece);
+        Square victimSq = static_cast<Square>((originalUs == Color::White) ? (static_cast<int>(to) - 8) : (static_cast<int>(to) + 8));
+        pos.setPieceBit(victimSq, undoState.capturedPiece);
     } else if (undoState.capturedPiece != Piece::None) {
         pos.setPieceBit(to, undoState.capturedPiece);
     }

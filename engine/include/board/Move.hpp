@@ -56,9 +56,9 @@ public:
         static const char* ranks = "12345678";
         std::string s = "";
         s += files[static_cast<int>(getFromSquare()) % 8];
-        s += ranks[7 - (static_cast<int>(getFromSquare()) / 8)];
+        s += ranks[(static_cast<int>(getFromSquare()) / 8)];
         s += files[static_cast<int>(getToSquare()) % 8];
-        s += ranks[7 - (static_cast<int>(getToSquare()) / 8)];
+        s += ranks[(static_cast<int>(getToSquare()) / 8)];
         if (isPromotion()) {
             static const char* pieces = " qrbn";
             s += pieces[static_cast<int>(getPromotionPiece())];

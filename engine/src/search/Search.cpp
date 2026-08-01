@@ -6,6 +6,7 @@
 #include "evaluation/Evaluator.hpp"
 #include "board/MoveGenerator.hpp"
 #include "board/MoveExecutor.hpp"
+#include "board/bitboard.hpp"
 #include <iostream>
 #include <algorithm>
 
@@ -67,7 +68,7 @@ int Search::quiescence(Position& pos, int alpha, int beta, int ply) noexcept {
     }
     if (controller.shouldStop()) return 0;
 
-    int standPat = evaluate(pos);
+    int standPat = evaluate(pos); 
 
     if (standPat >= beta) return beta;
     if (standPat > alpha) alpha = standPat;
@@ -82,13 +83,15 @@ int Search::quiescence(Position& pos, int alpha, int beta, int ply) noexcept {
     for (size_t i = 0; i < tacticalMoves.size(); ++i) {
         UndoState undo;
         MoveExecutor::makeMove(pos, tacticalMoves[i], undo);
-        int score = -quiescence(pos, -beta, -alpha, ply + 1);
+        
+        int moveScore = -quiescence(pos, -beta, -alpha, ply + 1);
+        
         MoveExecutor::undoMove(pos, tacticalMoves[i], undo);
 
         if (controller.shouldStop()) return 0;
 
-        if (score >= beta) return beta;
-        if (score > alpha) alpha = standPat;
+        if (moveScore >= beta) return beta;
+        if (moveScore > alpha) alpha = moveScore; 
     }
 
     return alpha;
@@ -174,7 +177,7 @@ int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLi
         return 0; 
     }
 
-    // Correct MoveOrderer Call Site: Pass prevMove to sort counter-moves cleanly
+    // 1. Initial score assignment and complete sorting pass
     MoveOrderer::scoreAndSortMoves(pos, legalMoves, ttMove, s_killerMoves, s_historyTable, ply, prevMove);
 
     int bestScore = -INF;
@@ -184,14 +187,12 @@ int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLi
 
     for (size_t i = 0; i < legalMoves.size(); ++i) {
         const Move& m = legalMoves[i];
-        
-        Bitboard targetBit = 1ULL << static_cast<size_t>(m.getToSquare());
-        bool isCaptureMove = (pos.getTotalOccupancy() & targetBit) || 
-                             (m.getToSquare() == pos.getEnPassantSquare() && pos.getEnPassantSquare() != Square::None);
-        
-        bool isPromotionMove = ((m.getFromSquare() >= Square::A7 && m.getFromSquare() <= Square::H7 && pos.getPieceBitboard(Piece::WhitePawn) & (1ULL << static_cast<size_t>(m.getFromSquare()))) ||
-                                (m.getFromSquare() >= Square::A2 && m.getFromSquare() <= Square::H2 && pos.getPieceBitboard(Piece::BlackPawn) & (1ULL << static_cast<size_t>(m.getFromSquare())))) &&
-                               (static_cast<int>(m.getToSquare()) / 8 == 7 || static_cast<int>(m.getToSquare()) / 8 == 0);
+
+        const Bitboard targetBit = Bitboards::getSquareBit(m.getToSquare());
+        const bool isCaptureMove = (pos.getTotalOccupancy() & targetBit) != 0 ||
+                                   m.isEnPassant() ||
+                                   (m.getToSquare() == pos.getEnPassantSquare() && pos.getEnPassantSquare() != Square::None);
+        const bool isPromotionMove = m.isPromotion();
 
         UndoState undo;
         MoveExecutor::makeMove(pos, legalMoves[i], undo);
@@ -207,12 +208,12 @@ int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLi
                 score = -negamax(pos, depth - 1 - reduction, -alpha - 1, -alpha, ply + 1, childPv, true, m);
                 if (score > alpha) {
                     stats.researches++;
-                    score = -negamax(pos, depth - 1, -alpha - 1, -alpha, ply + 1, childPv, true, m);
+                    score = -negamax(pos, depth - 1, -beta, -alpha, ply + 1, childPv, true, m);
                 }
             }
         }
 
-        if (score == -INF || (score > alpha && reduction > 0)) {
+        if (score == -INF) {
             score = -negamax(pos, depth - 1, -beta, -alpha, ply + 1, childPv, true, m);
         }
 
@@ -239,13 +240,12 @@ int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLi
         if (alpha >= beta) {
             stats.betaCutoffs++;
             
-            // Contextual Counter Move update
             if (prevMove.getRawData() != 0) {
                 s_cmTable.store(prevMove.getFromSquare(), prevMove.getToSquare(), m);
                 
-                // Extract active moving piece type to update continuation weights
+                const Bitboard fromBit = Bitboards::getSquareBit(m.getFromSquare());
                 for (size_t p = 0; p < 12; ++p) {
-                    if (pos.getPieceBitboard(static_cast<Piece>(p)) & (1ULL << static_cast<size_t>(m.getFromSquare()))) {
+                    if (pos.getPieceBitboard(static_cast<Piece>(p)) & fromBit) {
                         stats.conthistCutoffs++;
                         s_chTable.updateScore(static_cast<Piece>(p), prevMove.getToSquare(), m.getToSquare(), depth * depth);
                         break;
@@ -259,14 +259,14 @@ int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLi
                     s_killerMoves[ply][0] = m;
                 }
                 
-                // UNIFIED AGING MECHANISM: Scales down all historical data structures together
+                const Bitboard fromBit = Bitboards::getSquareBit(m.getFromSquare());
                 for (size_t p = 0; p < 12; ++p) {
-                    if (pos.getPieceBitboard(static_cast<Piece>(p)) & (1ULL << static_cast<size_t>(m.getFromSquare()))) {
+                    if (pos.getPieceBitboard(static_cast<Piece>(p)) & fromBit) {
                         if (s_historyTable[p][static_cast<size_t>(m.getToSquare())] > 50000) {
                             stats.normalizationEvents++;
                             for (auto& r : s_historyTable) { for (auto& v : r) v /= 2; }
                             s_chTable.normalize();
-                            Evaluator::getCorrHist().normalize(); // Synchronized correction aging decay
+                            Evaluator::getCorrHist().normalize(); 
                         }
                         s_historyTable[p][static_cast<size_t>(m.getToSquare())] += depth * depth;
                         break;
@@ -280,18 +280,14 @@ int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLi
     if (controller.shouldStop()) return 0;
 
     TTNodeType storeType = TTNodeType::Exact;
-    if (bestScore <= originalAlpha)  storeType = TTNodeType::UpperBound;
+    if (bestScore <= originalAlpha)   storeType = TTNodeType::UpperBound;
     else if (bestScore >= beta)      storeType = TTNodeType::LowerBound;
 
-    // =========================================================================
-    // UPDATE RULE: Record evaluation bias only on highly reliable exact nodes
-    // =========================================================================
     if (storeType == TTNodeType::Exact && !inCheck && depth >= 4) {
         int staticEval = evaluate(pos);
         stats.corrUpdates++;
         Evaluator::getCorrHist().updateCorrection(pos.getSideToMove(), pos.getHashKey(), depth, bestScore, staticEval);
     }
-    // =========================================================================
 
     s_tt.store(pos.getHashKey(), bestScore, bestMove, depth, storeType, 0);
     return bestScore;
@@ -299,11 +295,43 @@ int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLi
 
 int Search::runSearch(Position& pos, int maxDepth) noexcept {
     auto& controller = SearchController::getInstance();
-    auto& stats = controller.getStats();
+    auto& stats = controller.getStats(); 
+
+    // ✅ FIXED: Safely reset individual counters while handling std::string cleanly
+    stats.nodes = 0;
+    stats.qNodes = 0;
+    stats.ttHits = 0;
+    stats.failHighs = 0;
+    stats.failLows = 0;
+    stats.aspirationSuccesses = 0;
+    stats.researchCount = 0;
+    stats.nullAttempts = 0;
+    stats.nullCutoffs = 0;
+    stats.nullFailures = 0;
+    stats.nullDisabled = 0;
+    stats.lmrAttempts = 0;
+    stats.researches = 0;
+    stats.successfulResearches = 0;
+    stats.cmhHits = 0;
+    stats.cmhCutoffs = 0;
+    stats.conthistHits = 0;
+    stats.conthistCutoffs = 0;
+    stats.normalizationEvents = 0;
+    stats.corrApplied = 0;
+    stats.corrUpdates = 0;
+    stats.completedDepth = 0;
+    stats.elapsedTimeMs = 0;
+    
+    // Reset the string containers using native class clear implementations
+    stats.pvString.clear(); 
 
     s_tt.clear();
     for (auto& row : s_killerMoves) row.fill(Move());
     for (auto& row : s_historyTable) row.fill(0);
+    s_cmTable.clear();
+    s_chTable.clear();
+
+    Evaluator::getCorrHist().clear(); 
 
     std::cout << "[BOSON SEARCH] Running Ordered Alpha-Beta + Aspiration Framework...\n";
 
@@ -340,7 +368,6 @@ int Search::runSearch(Position& pos, int maxDepth) noexcept {
                     stats.failLows++;
                     stats.researchCount++;
                     researchAttemptsAtThisDepth++;
-                    betaWindow = (alphaWindow + betaWindow) / 2;
                     alphaWindow = lastScore - (delta * (1 << researchAttemptsAtThisDepth));
                     if (alphaWindow <= -INF) alphaWindow = -INF;
                 }
@@ -348,7 +375,6 @@ int Search::runSearch(Position& pos, int maxDepth) noexcept {
                     stats.failHighs++;
                     stats.researchCount++;
                     researchAttemptsAtThisDepth++;
-                    alphaWindow = (alphaWindow + betaWindow) / 2;
                     betaWindow = lastScore + (delta * (1 << researchAttemptsAtThisDepth));
                     if (betaWindow >= INF) betaWindow = INF;
                 }
@@ -417,7 +443,6 @@ int Search::runSearch(Position& pos, int maxDepth) noexcept {
     std::cout << "\n--- Late Move Reduction Analytics ---\n";
     std::cout << "  -> LMR Reduction Attempts  : " << stats.lmrAttempts << "\n";
     
-    // Explicit safety check to prevent divide-by-zero outputs on quick shallow runs
     uint64_t totalLmr = stats.lmrAttempts;
     double researchRate = totalLmr > 0 ? (static_cast<double>(stats.researches) / totalLmr) * 100.0 : 0.0;
     double successRate = stats.researches > 0 ? (static_cast<double>(stats.successfulResearches) / stats.researches) * 100.0 : 0.0;

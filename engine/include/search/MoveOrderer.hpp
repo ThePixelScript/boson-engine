@@ -16,6 +16,7 @@ public:
     static constexpr int SCORE_KILLER_2    = 29000;
     static constexpr int SCORE_QUIET       = 0;
 
+    // Rows = victim piece type, columns = attacker piece type.
     static const std::array<std::array<int, 6>, 6> MVV_LVA;
 
     static void scoreAndSortMoves(

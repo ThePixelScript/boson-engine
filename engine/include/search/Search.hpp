@@ -20,7 +20,8 @@ public:
     static uint64_t perft(Position& pos, int depth) noexcept;
     static void divide(Position& pos, int depth) noexcept;
     static int runSearch(Position& pos, int maxDepth) noexcept;
-
+    static TranspositionTable s_tt;
+    
     [[nodiscard]] static const CounterMoveTable& getCMH() noexcept { return s_cmTable; }
     [[nodiscard]] static const ContinuationHistoryTable& getContHist() noexcept { return s_chTable; }
 
@@ -29,7 +30,6 @@ private:
     static int quiescence(Position& pos, int alpha, int beta, int ply) noexcept;
     static int evaluate(const Position& pos) noexcept;
 
-    static TranspositionTable s_tt;
     static CounterMoveTable s_cmTable;
     static ContinuationHistoryTable s_chTable; // Managed memory layer
     static std::array<std::array<Move, 2>, 64> s_killerMoves;

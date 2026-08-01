@@ -1,22 +1,19 @@
 cmake_minimum_required(VERSION 3.25)
 project(Boson VERSION 0.1.0 LANGUAGES CXX)
 
-# Enforce strict compliance with C++23 specifications
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Binary distribution layout
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
-# Zero-tolerance compiler warning and optimization pipeline
 if(MSVC)
     add_compile_options(
-        /W4          # Maximum warning level
-        /WX          # Treat warnings as errors
-        /Oi          # Enable intrinsic functions
-        /O2          # Maximum speed optimization
-        /permissive- # Enforce strict standard conformance
+        /W4          
+        /WX          
+        /Oi          
+        /O2          
+        /permissive- 
     )
     add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
 else()
@@ -24,19 +21,36 @@ else()
         -Wall
         -Wextra
         -Wpedantic
-        -Werror      # Treat warnings as errors
-        -O3          # Aggressive optimization
-        -mavx2       # Target AVX2 instruction set vector lines
-        -mbmi2       # Enable PEXT/PDEP bit manipulation instructions
-        -mpopcnt     # Hardware-accelerated bit counting
+        -Werror      
+        -O3          
+        -mavx2       
+        -mbmi2       
+        -mpopcnt     
     )
 endif()
 
-# Since CMakeLists.txt is inside 'engine/', headers are just in 'include/'
+# Global include directory for headers
 include_directories(include)
 
-# Gather all source files dynamically from 'src/' relative to this file
+# 1. GATHER ALL ENGINE SOURCE FILES
 file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS "src/*.cpp")
 
-# Core engine target configuration
+# Core engine target configuration (Includes main.cpp)
 add_executable(boson ${SOURCES})
+
+# ---------------------------------------------------------------------------
+# 2. TEST RUNNER TARGET (Excluding main.cpp)
+# ---------------------------------------------------------------------------
+# Copy the source list and filter out main.cpp to prevent LNK2005 multiply defined symbols
+set(ENGINE_TEST_SOURCES ${SOURCES})
+list(REMOVE_ITEM ENGINE_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp")
+
+set(TEST_SOURCES
+    ../tests/TestRunner.cpp
+    ${ENGINE_TEST_SOURCES}
+)
+
+add_executable(boson_tests ${TEST_SOURCES})
+
+# Ensure the test target can see the headers cleanly
+target_include_directories(boson_tests PRIVATE include)
