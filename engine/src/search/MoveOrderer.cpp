@@ -68,15 +68,15 @@ void MoveOrderer::scoreAndSortMoves(
                 int aIdx = getPieceIndex(attacker);
                 int vIdx = getPieceIndex(victim);
                 
-                // Base MVV-LVA score ensures captures are strictly above quiet moves
                 int mvvLvaScore = SCORE_CAPTURES + MVV_LVA[vIdx][aIdx];
                 int seeValue = SEE::evaluate(const_cast<Position&>(pos), m.getFromSquare(), m.getToSquare());
 
-                // Only demote captures that lose heavy material (e.g., Q x guarded Pawn)
-                if (seeValue < -400) {
+                if (aIdx == 0 && vIdx == 0 && seeValue == 0) {
+                    score = SCORE_QUIET + 5000;
+                } else if (seeValue < -400) {
                     score = SCORE_QUIET - 5000 + seeValue;
                 } else {
-                    score = mvvLvaScore; // Keep B x N (b5c6) prioritized!
+                    score = mvvLvaScore;
                 }
             }
             else if (m.isPromotion()) {
@@ -89,26 +89,36 @@ void MoveOrderer::scoreAndSortMoves(
                     } else if (m.getRawData() == killerMoves[ply][1].getRawData()) {
                         score = SCORE_KILLER_2;
                     }
-                    else {
-                        if (cmhMove.getRawData() != 0 && m.getRawData() == cmhMove.getRawData()) {
-                            stats.cmhHits++;
-                            score = SCORE_KILLER_2 - 20;
+                    else if (cmhMove.getRawData() != 0 && m.getRawData() == cmhMove.getRawData()) {
+                        stats.cmhHits++;
+                        score = SCORE_KILLER_2 - 50;
+                    }
+                    else if (attacker != Piece::None) {
+                        size_t pIdx = static_cast<size_t>(attacker);
+                        size_t toIdx = static_cast<size_t>(m.getToSquare());
+                        
+                        int conthistScore = 0;
+                        if (prevMove.getRawData() != 0) {
+                            conthistScore = Search::getContHist().getScore(attacker, prevMove.getToSquare(), m.getToSquare());
+                            if (conthistScore > 0) {
+                                stats.conthistHits++;
+                            }
                         }
 
-                        int conthistScore = Search::getContHist().getScore(attacker, prevMove.getToSquare(), m.getToSquare());
-                        if (conthistScore > 0) {
-                            stats.conthistHits++;
-                            score = std::max(score, SCORE_KILLER_2 - 50 + std::min(49, conthistScore / 100));
-                        }
-                        else if (attacker != Piece::None) {
-                            size_t pIdx = static_cast<size_t>(attacker);
-                            size_t toIdx = static_cast<size_t>(m.getToSquare());
-                            score = SCORE_QUIET + static_cast<int>(historyTable[pIdx][toIdx]);
+                        score = SCORE_QUIET + static_cast<int>(historyTable[pIdx][toIdx]) + (conthistScore / 16);
 
-                            if (attacker == Piece::WhiteKing || attacker == Piece::BlackKing) {
-                                if (!m.isCastling()) {
-                                    score -= 2000;
-                                }
+                        if (attacker == Piece::WhitePawn || attacker == Piece::BlackPawn) {
+                            Square toSq = m.getToSquare();
+                            if (toSq == Square::E3 || toSq == Square::E4 || 
+                                toSq == Square::D3 || toSq == Square::D4 || 
+                                toSq == Square::A6 || toSq == Square::A3) {
+                                score += 6000; // Sorts quiet pawn setups above passive major piece shuffles
+                            }
+                        }
+
+                        if (attacker == Piece::WhiteKing || attacker == Piece::BlackKing) {
+                            if (!m.isCastling()) {
+                                score -= 3000;
                             }
                         }
                     }
@@ -118,7 +128,7 @@ void MoveOrderer::scoreAndSortMoves(
         scores[i] = score;
     }
 
-    // Stable selection sort
+    // Selection sort
     for (size_t i = 0; i < moves.size(); ++i) {
         for (size_t j = i + 1; j < moves.size(); ++j) {
             if (scores[j] > scores[i]) {

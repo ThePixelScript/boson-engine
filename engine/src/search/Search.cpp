@@ -175,7 +175,6 @@ int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLi
         }
     }
 
-    // Null Move Pruning Safeguard: Only execute if position is statically safe
     int staticEval = evaluate(pos);
     constexpr int R = 2; 
     if (allowNull && depth >= 3 && !inCheck && staticEval >= beta) {
@@ -245,24 +244,42 @@ int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLi
 
         bool givesCheck = MoveGenerator::inCheck(pos, pos.getSideToMove());
 
+        int searchedDepth = depth - 1;
         int score = -INF;
         int reduction = 0;
 
-        // LMR Guard: Do not reduce moves that give check
-        if (depth >= 3 && movesSearched >= 4 && !inCheck && !isCaptureMove && !isPromotionMove && !givesCheck) {
-            reduction = LMRPolicy::getReduction(depth, movesSearched);
+        // LMR Guard: Do NOT reduce root PV moves (ply == 0) or early candidates
+        bool isPvMove = (ttMove.getRawData() != 0 && m.getRawData() == ttMove.getRawData());
+        bool isEarlyMove = (movesSearched <= 3);
+
+        if (ply > 0 && searchedDepth >= 3 && !isEarlyMove && !isPvMove && !inCheck && !isCaptureMove && !isPromotionMove && !givesCheck) {
+            reduction = LMRPolicy::getReduction(searchedDepth, movesSearched);
+            
+            // History Discount
+            const Bitboard fromBit = Bitboards::getSquareBit(m.getFromSquare());
+            for (size_t p = 0; p < 12; ++p) {
+                if (pos.getPieceBitboard(static_cast<Piece>(p)) & fromBit) {
+                    size_t pIdx = p;
+                    size_t toIdx = static_cast<size_t>(m.getToSquare());
+                    if (s_historyTable[pIdx][toIdx] > 4000) {
+                        reduction = std::max(0, reduction - 1);
+                    }
+                    break;
+                }
+            }
+
             if (reduction > 0) {
                 stats.lmrAttempts++;
-                score = -negamax(pos, depth - 1 - reduction, -alpha - 1, -alpha, ply + 1, childPv, true, m);
+                score = -negamax(pos, searchedDepth - reduction, -alpha - 1, -alpha, ply + 1, childPv, true, m);
                 if (score > alpha) {
                     stats.researches++;
-                    score = -negamax(pos, depth - 1, -beta, -alpha, ply + 1, childPv, true, m);
+                    score = -negamax(pos, searchedDepth, -beta, -alpha, ply + 1, childPv, true, m);
                 }
             }
         }
 
         if (score == -INF) {
-            score = -negamax(pos, depth - 1, -beta, -alpha, ply + 1, childPv, true, m);
+            score = -negamax(pos, searchedDepth, -beta, -alpha, ply + 1, childPv, true, m);
         }
 
         MoveExecutor::undoMove(pos, legalMoves[i], undo);
@@ -289,8 +306,12 @@ int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLi
             stats.betaCutoffs++;
             
             if (prevMove.getRawData() != 0) {
+                Move cmhMove = s_cmTable.getCounterMove(prevMove.getFromSquare(), prevMove.getToSquare());
+                if (cmhMove.getRawData() != 0 && m.getRawData() == cmhMove.getRawData()) {
+                    stats.cmhCutoffs++;
+                }
                 s_cmTable.store(prevMove.getFromSquare(), prevMove.getToSquare(), m);
-                
+
                 const Bitboard fromBit = Bitboards::getSquareBit(m.getFromSquare());
                 for (size_t p = 0; p < 12; ++p) {
                     if (pos.getPieceBitboard(static_cast<Piece>(p)) & fromBit) {
@@ -310,13 +331,16 @@ int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLi
                 const Bitboard fromBit = Bitboards::getSquareBit(m.getFromSquare());
                 for (size_t p = 0; p < 12; ++p) {
                     if (pos.getPieceBitboard(static_cast<Piece>(p)) & fromBit) {
-                        if (s_historyTable[p][static_cast<size_t>(m.getToSquare())] > 50000) {
-                            stats.normalizationEvents++;
-                            for (auto& r : s_historyTable) { for (auto& v : r) v /= 2; }
-                            s_chTable.normalize();
-                            Evaluator::getCorrHist().normalize(); 
-                        }
-                        s_historyTable[p][static_cast<size_t>(m.getToSquare())] += depth * depth;
+                        size_t pIdx = p;
+                        size_t toIdx = static_cast<size_t>(m.getToSquare());
+
+                        // Stockfish Saturating History Gravity
+                        constexpr int D = 16384;
+                        int bonus = depth * depth;
+                        int currentVal = static_cast<int>(s_historyTable[pIdx][toIdx]);
+                        
+                        int updatedVal = currentVal + bonus - (currentVal * std::abs(bonus) / D);
+                        s_historyTable[pIdx][toIdx] = static_cast<uint32_t>(std::clamp(updatedVal, -D, D));
                         break;
                     }
                 }
@@ -393,6 +417,11 @@ int Search::runSearch(Position& pos, int maxDepth) noexcept {
                 stats.stopReason = StopReason::SoftTimeLimit;
                 break;
             }
+        }
+
+        // Stockfish Root PV Lock: Store iteration d-1 best move into TT as Exact
+        if (d > 1 && stablePv.count > 0) {
+            s_tt.store(pos.getHashKey(), lastScore, stablePv.moves[0], d + 2, TTNodeType::Exact, 0);
         }
 
         int score = 0;

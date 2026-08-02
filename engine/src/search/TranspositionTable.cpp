@@ -24,6 +24,13 @@ void TranspositionTable::store(uint64_t key, int score, Move bestMove, int depth
     size_t index = key % m_capacity;
     TTEntry& entry = m_table[index];
 
+    // 🎯 Protect deeper Exact PV entries from being overwritten by shallow aspiration noise
+    if (entry.key == key) {
+        if (entry.depth > depth && entry.type == TTNodeType::Exact && type != TTNodeType::Exact) {
+            return; 
+        }
+    }
+
     // Depth-preferred replacement scheme
     if (entry.key != key || depth >= entry.depth || type == TTNodeType::Exact) {
         entry.key = key;
