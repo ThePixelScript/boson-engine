@@ -29,6 +29,10 @@
 #include "integrity/PositionFingerprint.hpp"
 #include "integrity/IntegritySuite.hpp"
 #include "integrity/IntegritySuite.cpp"
+#include "benchmark/BenchmarkTypes.hpp"
+#include "benchmark/BenchmarkCorpus.hpp"
+#include "benchmark/BenchmarkRunner.hpp"
+#include "benchmark/BenchmarkReporter.hpp"
 
 namespace Boson {
 
@@ -3619,6 +3623,247 @@ bool runMilestoneOmegaPhase3IntegrityTests() {
     return IntegrityRunner::runMilestoneOmegaPhase3IntegrityTests();
 }
 
+// ---------------------------------------------------------------------------
+// Milestone Omega Phase 4: Deterministic Benchmark Suite Integration
+// ---------------------------------------------------------------------------
+
+bool testGateOmega4A_Determinism() {
+    BenchmarkConfig config;
+    config.overrideDepth = 5;
+    config.hashSizeMb = 16;
+    config.mode = BenchmarkStateMode::Isolated;
+    config.threads = 1;
+    config.printConsole = false;
+    config.silentSearch = true;
+
+    BenchmarkRunRecord pass1 = BenchmarkRunner::run(config);
+    BenchmarkRunRecord pass2 = BenchmarkRunner::run(config);
+
+    if (pass1.positions.size() != 6 || pass2.positions.size() != 6) {
+        std::cerr << "[FAIL] Gate Omega 4-A: Benchmark position count mismatch (expected 6)\n";
+        return false;
+    }
+
+    if (pass1.aggregate.totalNodes != pass2.aggregate.totalNodes) {
+        std::cerr << "[FAIL] Gate Omega 4-A: Aggregate node mismatch: "
+                  << pass1.aggregate.totalNodes << " vs " << pass2.aggregate.totalNodes << "\n";
+        return false;
+    }
+
+    for (size_t i = 0; i < pass1.positions.size(); ++i) {
+        const auto& p1 = pass1.positions[i];
+        const auto& p2 = pass2.positions[i];
+
+        if (!(p1.deterministic == p2.deterministic)) {
+            std::cerr << "[FAIL] Gate Omega 4-A: Deterministic telemetry divergence on position "
+                      << p1.id << "\n";
+            std::cerr << "  Nodes: " << p1.deterministic.totalNodes << " vs " << p2.deterministic.totalNodes << "\n";
+            std::cerr << "  BestMove: " << p1.deterministic.bestMoveUci << " vs " << p2.deterministic.bestMoveUci << "\n";
+            std::cerr << "  TTHits: " << p1.deterministic.ttHits << " vs " << p2.deterministic.ttHits << "\n";
+            std::cerr << "  BetaCutoffs: " << p1.deterministic.betaCutoffs << " vs " << p2.deterministic.betaCutoffs << "\n";
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool testGateOmega4B_StateIsolation() {
+    auto posOptA = FenParser::parse("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+    auto posOptB = FenParser::parse("2rr3k/pp3pp1/1nnqbN1p/3pN3/2pP4/2P3Q1/PPB4P/R4RK1 w - - 0 1");
+    if (!posOptA || !posOptB) return false;
+
+    std::ostringstream dummy;
+    std::streambuf* origBuf = std::cout.rdbuf(dummy.rdbuf());
+
+    // 1. ISOLATED MODE:
+    BenchmarkRunner::resetSearchState(16);
+    Position bDirect = *posOptB;
+    SearchLimits limitsIso;
+    limitsIso.depth = 5;
+    limitsIso.clearTables = true;
+    Search::runSearch(bDirect, limitsIso);
+    uint64_t bDirectNodes = SearchController::getInstance().getStats().nodes + SearchController::getInstance().getStats().qNodes;
+    std::string bDirectMove = SearchController::getInstance().getStats().pvString;
+
+    BenchmarkRunner::resetSearchState(16);
+    Position aPos = *posOptA;
+    Search::runSearch(aPos, limitsIso);
+
+    BenchmarkRunner::resetSearchState(16);
+    Position bAfterA = *posOptB;
+    Search::runSearch(bAfterA, limitsIso);
+    uint64_t bAfterANodes = SearchController::getInstance().getStats().nodes + SearchController::getInstance().getStats().qNodes;
+    std::string bAfterAMove = SearchController::getInstance().getStats().pvString;
+
+    // 2. PERSISTENT MODE:
+    BenchmarkRunner::resetSearchState(16);
+    Position startposClean = *posOptA;
+    SearchLimits limitsDirect6;
+    limitsDirect6.depth = 6;
+    limitsDirect6.clearTables = true;
+    Search::runSearch(startposClean, limitsDirect6);
+    uint64_t cleanDepth6Nodes = SearchController::getInstance().getStats().nodes + SearchController::getInstance().getStats().qNodes;
+
+    BenchmarkRunner::resetSearchState(16);
+    Position startposWarm = *posOptA;
+    SearchLimits limitsPersistent5;
+    limitsPersistent5.depth = 5;
+    limitsPersistent5.clearTables = false;
+    Search::runSearch(startposWarm, limitsPersistent5);
+
+    SearchLimits limitsPersistent6;
+    limitsPersistent6.depth = 6;
+    limitsPersistent6.clearTables = false;
+    Search::runSearch(startposWarm, limitsPersistent6);
+    uint64_t warmDepth6Nodes = SearchController::getInstance().getStats().nodes + SearchController::getInstance().getStats().qNodes;
+
+    std::cout.rdbuf(origBuf);
+
+    if (bDirectNodes != bAfterANodes || bDirectMove != bAfterAMove) {
+        std::cerr << "[FAIL] Gate Omega 4-B: State isolation failed in Isolated mode (nodes: "
+                  << bDirectNodes << " vs " << bAfterANodes << ")\n";
+        return false;
+    }
+
+    if (warmDepth6Nodes == cleanDepth6Nodes) {
+        std::cerr << "[FAIL] Gate Omega 4-B: Persistent mode failed to utilize warm TT state (nodes unchanged: "
+                  << warmDepth6Nodes << ")\n";
+        return false;
+    }
+
+    return true;
+}
+
+bool testGateOmega4C_ProductionNeutrality() {
+    auto& controller = SearchController::getInstance();
+    const EngineParameters origParams = controller.getParams();
+
+    BenchmarkConfig cfg;
+    cfg.overrideDepth = 3;
+    cfg.silentSearch = true;
+    cfg.printConsole = false;
+    BenchmarkRunner::run(cfg);
+
+    const EngineParameters postParams = controller.getParams();
+
+    if (postParams.search.lmrBase != origParams.search.lmrBase
+        || postParams.search.lmrDivisor != origParams.search.lmrDivisor
+        || postParams.search.nmpMinDepth != origParams.search.nmpMinDepth
+        || postParams.search.aspirationInitialDelta != origParams.search.aspirationInitialDelta
+        || postParams.eval.pawnValue != origParams.eval.pawnValue
+        || postParams.eval.queenValue != origParams.eval.queenValue
+        || postParams.time.nodeCheckPeriod != origParams.time.nodeCheckPeriod
+        || postParams.debug.enableNMP != origParams.debug.enableNMP) {
+        std::cerr << "[FAIL] Gate Omega 4-C: Production EngineParameters mutated during benchmark execution\n";
+        return false;
+    }
+
+    return true;
+}
+
+bool testGateOmega4DE_SchemaSerialization() {
+    BenchmarkConfig cfg;
+    cfg.overrideDepth = 4;
+    cfg.silentSearch = true;
+    cfg.printConsole = false;
+    BenchmarkRunRecord record = BenchmarkRunner::run(cfg);
+
+    if (record.positions.size() != 6) {
+        std::cerr << "[FAIL] Gate Omega 4-D/E: Benchmark corpus size is not 6\n";
+        return false;
+    }
+
+    uint64_t sumNodes = 0;
+    uint64_t sumQNodes = 0;
+    for (const auto& pos : record.positions) {
+        sumNodes += pos.deterministic.totalNodes;
+        sumQNodes += pos.deterministic.totalQNodes;
+    }
+    if (sumNodes != record.aggregate.totalNodes || sumQNodes != record.aggregate.totalQNodes) {
+        std::cerr << "[FAIL] Gate Omega 4-D/E: Aggregate telemetry sum discrepancy\n";
+        return false;
+    }
+
+    std::string json = BenchmarkReporter::serializeJson(record);
+
+    if (json.find("\"schemaVersion\": \"1.0.0\"") == std::string::npos) {
+        std::cerr << "[FAIL] Gate Omega 4-D/E: Missing schemaVersion in JSON\n";
+        return false;
+    }
+    if (json.find("\"corpusVersion\": \"1.0.0\"") == std::string::npos) {
+        std::cerr << "[FAIL] Gate Omega 4-D/E: Missing corpusVersion in JSON\n";
+        return false;
+    }
+    if (json.find("\"engineName\": \"Boson\"") == std::string::npos) {
+        std::cerr << "[FAIL] Gate Omega 4-D/E: Missing engineName in JSON\n";
+        return false;
+    }
+    if (json.find("\"engineVersion\": \"0.8.0-dev\"") == std::string::npos) {
+        std::cerr << "[FAIL] Gate Omega 4-D/E: Missing engineVersion in JSON\n";
+        return false;
+    }
+    if (json.find("\"positions\": [") == std::string::npos) {
+        std::cerr << "[FAIL] Gate Omega 4-D/E: Missing positions array in JSON\n";
+        return false;
+    }
+
+    std::string parsedSchema, parsedCorpus;
+    uint64_t parsedNodes = 0;
+    size_t parsedPosCount = 0;
+    if (!BenchmarkReporter::parseJsonParity(json, parsedSchema, parsedCorpus, parsedNodes, parsedPosCount)) {
+        std::cerr << "[FAIL] Gate Omega 4-D/E: JSON parity parser failed\n";
+        return false;
+    }
+
+    if (parsedSchema != "1.0.0" || parsedCorpus != "1.0.0") {
+        std::cerr << "[FAIL] Gate Omega 4-D/E: Parsed version mismatch\n";
+        return false;
+    }
+    if (parsedNodes != record.aggregate.totalNodes) {
+        std::cerr << "[FAIL] Gate Omega 4-D/E: Parsed totalNodes mismatch: "
+                  << parsedNodes << " vs " << record.aggregate.totalNodes << "\n";
+        return false;
+    }
+    if (parsedPosCount != 6) {
+        std::cerr << "[FAIL] Gate Omega 4-D/E: Parsed posCount mismatch\n";
+        return false;
+    }
+
+    return true;
+}
+
+bool runMilestoneOmegaPhase4BenchmarkTests() {
+    std::cout << "\n=================================================================\n";
+    std::cout << "===   MILESTONE OMEGA, PHASE 4: BENCHMARK HARNESS TESTS       ===\n";
+    std::cout << "=================================================================\n";
+
+    int passed = 0;
+    int total = 4;
+
+    bool passA = testGateOmega4A_Determinism();
+    std::cout << "[" << (passA ? "PASS" : "FAIL") << "] Omega 4-A: Determinism Verification Across Passes\n";
+    if (passA) passed++;
+
+    bool passB = testGateOmega4B_StateIsolation();
+    std::cout << "[" << (passB ? "PASS" : "FAIL") << "] Omega 4-B: State Isolation & TT Eviction Verification\n";
+    if (passB) passed++;
+
+    bool passC = testGateOmega4C_ProductionNeutrality();
+    std::cout << "[" << (passC ? "PASS" : "FAIL") << "] Omega 4-C: Production Neutrality & Zero Side-Effects\n";
+    if (passC) passed++;
+
+    bool passDE = testGateOmega4DE_SchemaSerialization();
+    std::cout << "[" << (passDE ? "PASS" : "FAIL") << "] Omega 4-D/E: Schema Validation & JSON Round-Trip Parity\n";
+    if (passDE) passed++;
+
+    std::cout << "\n=================================================================\n";
+    std::cout << "MILESTONE OMEGA PHASE 4 RESULT: " << passed << "/" << total << " Test Categories Passed.\n";
+    std::cout << "=================================================================\n";
+
+    return (passed == total);
+}
+
 void runDiagnostics() {
     std::cout << "\n==================================================\n";
     std::cout << "===   EXECUTING BOSON SUBSYSTEM DIAGNOSTICS   ===\n";
@@ -3684,6 +3929,7 @@ int main() {
     bool omegaPhase1Success = Boson::runMilestoneOmegaPhase1Tests();
     bool omegaPhase2Success = Boson::runMilestoneOmegaPhase2TacticalTests();
     bool omegaPhase3Success = Boson::runMilestoneOmegaPhase3IntegrityTests();
+    bool omegaPhase4Success = Boson::runMilestoneOmegaPhase4BenchmarkTests();
     Boson::runDiagnostics();
-    return (m1Phase2Success && m1Module13Success && m2PhasesBCSuccess && m2PerftSuccess && phaseYZSuccess && phaseAASuccess && phaseABSuccess && m6Phase12Success && m6Module63Success && m6Module64Success && m6Module65Success && m6Module66Success && m6Module67Success && m6Module68Success && m6Module69Success && m6Module610Success && omegaPhase1Success && omegaPhase2Success && omegaPhase3Success) ? 0 : 1;
+    return (m1Phase2Success && m1Module13Success && m2PhasesBCSuccess && m2PerftSuccess && phaseYZSuccess && phaseAASuccess && phaseABSuccess && m6Phase12Success && m6Module63Success && m6Module64Success && m6Module65Success && m6Module66Success && m6Module67Success && m6Module68Success && m6Module69Success && m6Module610Success && omegaPhase1Success && omegaPhase2Success && omegaPhase3Success && omegaPhase4Success) ? 0 : 1;
 }

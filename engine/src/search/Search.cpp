@@ -516,13 +516,15 @@ int Search::runSearch(Position& pos, const SearchLimits& limits) noexcept {
     stats.pvString.clear(); 
     stats.pvLine.count = 0;
 
-    s_tt.clear();
-    for (auto& row : s_killerMoves) row.fill(Move());
-    for (auto& row : s_historyTable) row.fill(0);
-    s_cmTable.clear();
-    s_chTable.clear();
+    if (limits.clearTables) {
+        s_tt.clear();
+        for (auto& row : s_killerMoves) row.fill(Move());
+        for (auto& row : s_historyTable) row.fill(0);
+        s_cmTable.clear();
+        s_chTable.clear();
 
-    Evaluator::getCorrHist().clear(); 
+        Evaluator::getCorrHist().clear(); 
+    } 
 
     std::cout << "[BOSON SEARCH] Running Ordered Alpha-Beta + Aspiration Framework...\n";
 

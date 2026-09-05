@@ -14,6 +14,7 @@ struct SearchLimits {
     int depth = -1;
     int64_t nodes = -1;
     bool infinite = false;
+    bool clearTables = true;
 };
 
 } // namespace Boson
