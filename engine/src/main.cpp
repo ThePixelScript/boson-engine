@@ -1,35 +1,93 @@
 #include <iostream>
 #include <string_view>
 #include <string>
+#include <vector>
 #include "validation/VerificationHarness.hpp"
 #include "board/MoveGenerator.hpp"
 #include "fen/FenParser.hpp"
 #include "benchmark/BenchmarkRunner.hpp"
+#include "config/ParameterRegistry.hpp"
+#include "search/SearchController.hpp"
 
 int main(int argc, char* argv[]) {
     Boson::MoveGenerator::initializeTables();
 
+    // First pass: extract and apply all --param flags, separating positional/other args
+    std::vector<std::string_view> filteredArgs;
+    filteredArgs.push_back(argv[0]);
+
+    for (int i = 1; i < argc; ++i) {
+        std::string_view arg(argv[i]);
+        if (arg == "--param") {
+            if (i + 1 >= argc) {
+                std::cerr << "[ERROR] --param requires argument in format <Name>=<Value>\n";
+                return 1;
+            }
+            std::string_view spec(argv[++i]);
+            std::string name, val;
+            if (!Boson::ParameterRegistry::parseCliParam(spec, name, val)) {
+                std::cerr << "[ERROR] Invalid parameter specification: " << spec << "\n";
+                return 1;
+            }
+            if (!Boson::ParameterRegistry::getInstance().setParamFromString(name, val)) {
+                std::cerr << "[ERROR] Failed to set parameter '" << name << "' to '" << val << "'\n";
+                return 1;
+            }
+        } else if (arg.starts_with("--param=")) {
+            std::string name, val;
+            if (!Boson::ParameterRegistry::parseCliParam(arg, name, val)) {
+                std::cerr << "[ERROR] Invalid parameter specification: " << arg << "\n";
+                return 1;
+            }
+            if (!Boson::ParameterRegistry::getInstance().setParamFromString(name, val)) {
+                std::cerr << "[ERROR] Failed to set parameter '" << name << "' to '" << val << "'\n";
+                return 1;
+            }
+        } else {
+            filteredArgs.push_back(arg);
+        }
+    }
+
     // CLI Dispatch Router: bench command
-    if (argc > 1 && (std::string_view(argv[1]) == "bench" || std::string_view(argv[1]) == "--bench")) {
+    if (filteredArgs.size() > 1 && (filteredArgs[1] == "bench" || filteredArgs[1] == "--bench")) {
         Boson::BenchmarkConfig config;
-        for (int i = 2; i < argc; ++i) {
-            std::string_view arg(argv[i]);
-            if (arg == "--depth" && i + 1 < argc) {
-                config.overrideDepth = std::stoi(argv[++i]);
-            } else if (arg == "--hash" && i + 1 < argc) {
-                config.hashSizeMb = static_cast<size_t>(std::stoul(argv[++i]));
-            } else if (arg == "--mode" && i + 1 < argc) {
-                std::string_view modeStr(argv[++i]);
+        bool explicitHash = false;
+        for (size_t i = 2; i < filteredArgs.size(); ++i) {
+            std::string_view arg = filteredArgs[i];
+            if (arg == "--depth" && i + 1 < filteredArgs.size()) {
+                config.overrideDepth = std::stoi(std::string(filteredArgs[++i]));
+            } else if (arg == "--hash" && i + 1 < filteredArgs.size()) {
+                config.hashSizeMb = static_cast<size_t>(std::stoul(std::string(filteredArgs[++i])));
+                explicitHash = true;
+            } else if (arg == "--mode" && i + 1 < filteredArgs.size()) {
+                std::string_view modeStr = filteredArgs[++i];
                 if (modeStr == "persistent") {
                     config.mode = Boson::BenchmarkStateMode::Persistent;
                 } else {
                     config.mode = Boson::BenchmarkStateMode::Isolated;
                 }
-            } else if (arg == "--json" && i + 1 < argc) {
-                config.jsonOutputFile = argv[++i];
+            } else if (arg == "--json" && i + 1 < filteredArgs.size()) {
+                config.jsonOutputFile = std::string(filteredArgs[++i]);
+            }
+        }
+        if (!explicitHash) {
+            int64_t regHash = Boson::ParameterRegistry::getInstance().getInt("Hash");
+            if (regHash > 0) {
+                config.hashSizeMb = static_cast<size_t>(regHash);
             }
         }
         Boson::BenchmarkRunner::run(config);
+        return 0;
+    }
+
+    // CLI Dispatch Router: uci command
+    if (filteredArgs.size() > 1 && (filteredArgs[1] == "uci" || filteredArgs[1] == "--uci")) {
+        std::string line;
+        Boson::ParameterRegistry::getInstance().handleUciCommand("uci");
+        while (std::getline(std::cin, line)) {
+            if (line == "quit") break;
+            Boson::ParameterRegistry::getInstance().handleUciCommand(line);
+        }
         return 0;
     }
 

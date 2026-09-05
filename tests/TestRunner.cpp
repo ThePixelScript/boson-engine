@@ -23,6 +23,7 @@
 #include "evaluation/Evaluator.hpp"
 #include "evaluation/PieceSquareTables.hpp"
 #include "config/EngineParameters.hpp"
+#include "config/ParameterRegistry.hpp"
 #include "system/EngineInfo.hpp"
 #include "tactical/TacticalSuite.hpp"
 #include "tactical/TacticalSuite.cpp"
@@ -4200,6 +4201,399 @@ bool runMilestoneOmegaPhase5StrengthTests() {
     return (passed == total);
 }
 
+// ============================================================================
+// MILESTONE OMEGA, PHASE 6: PARAMETER REGISTRY & UCI CONFIGURATION TESTS
+// ============================================================================
+
+bool testGateOmega6A_RegistryInitializationAndDefaults() {
+    auto& reg = ParameterRegistry::getInstance();
+    reg.resetToDefaults();
+
+    if (reg.size() < 8) {
+        std::cerr << "[FAIL] Gate Omega 6-A: ParameterRegistry has fewer than 8 parameters\n";
+        return false;
+    }
+
+    const char* mandated[] = {
+        "Hash", "NMP_BaseReduction", "NMP_DepthDivisor",
+        "LMR_Base", "LMR_Divisor", "Aspiration_InitialWindow",
+        "History_MaxScore", "Time_MoveAllocationDivisor"
+    };
+    for (const char* name : mandated) {
+        if (!reg.hasParam(name)) {
+            std::cerr << "[FAIL] Gate Omega 6-A: Mandated parameter missing: " << name << "\n";
+            return false;
+        }
+    }
+
+    const auto* pHash = reg.getParam("Hash");
+    if (!pHash || pHash->getInt() != 16 || pHash->type != ParamType::Int ||
+        pHash->group != ParamGroup::Memory || pHash->resetRequirement != ResetRequirement::ClearTT ||
+        std::get<int64_t>(pHash->minValue) != 1 || std::get<int64_t>(pHash->maxValue) != 65536) {
+        std::cerr << "[FAIL] Gate Omega 6-A: Hash parameter descriptor incorrect\n";
+        return false;
+    }
+
+    const auto* pNmpR = reg.getParam("NMP_BaseReduction");
+    if (!pNmpR || pNmpR->getInt() != 2 || std::get<int64_t>(pNmpR->minValue) != 1 || std::get<int64_t>(pNmpR->maxValue) != 6) {
+        std::cerr << "[FAIL] Gate Omega 6-A: NMP_BaseReduction descriptor incorrect\n";
+        return false;
+    }
+
+    const auto* pNmpD = reg.getParam("NMP_DepthDivisor");
+    if (!pNmpD || pNmpD->getInt() != 3 || std::get<int64_t>(pNmpD->minValue) != 1 || std::get<int64_t>(pNmpD->maxValue) != 10) {
+        std::cerr << "[FAIL] Gate Omega 6-A: NMP_DepthDivisor descriptor incorrect\n";
+        return false;
+    }
+
+    const auto* pLmrB = reg.getParam("LMR_Base");
+    if (!pLmrB || std::abs(pLmrB->getDouble() - 0.5) > 1e-6 || std::get<double>(pLmrB->minValue) != 0.0 || std::get<double>(pLmrB->maxValue) != 3.0) {
+        std::cerr << "[FAIL] Gate Omega 6-A: LMR_Base descriptor incorrect\n";
+        return false;
+    }
+
+    const auto* pLmrD = reg.getParam("LMR_Divisor");
+    if (!pLmrD || std::abs(pLmrD->getDouble() - 1.95) > 1e-6 || std::get<double>(pLmrD->minValue) != 0.5 || std::get<double>(pLmrD->maxValue) != 5.0) {
+        std::cerr << "[FAIL] Gate Omega 6-A: LMR_Divisor descriptor incorrect\n";
+        return false;
+    }
+
+    const auto* pAsp = reg.getParam("Aspiration_InitialWindow");
+    if (!pAsp || pAsp->getInt() != 30 || std::get<int64_t>(pAsp->minValue) != 5 || std::get<int64_t>(pAsp->maxValue) != 200) {
+        std::cerr << "[FAIL] Gate Omega 6-A: Aspiration_InitialWindow descriptor incorrect\n";
+        return false;
+    }
+
+    const auto* pHist = reg.getParam("History_MaxScore");
+    if (!pHist || pHist->getInt() != 16384 || std::get<int64_t>(pHist->minValue) != 256 || std::get<int64_t>(pHist->maxValue) != 65536) {
+        std::cerr << "[FAIL] Gate Omega 6-A: History_MaxScore descriptor incorrect\n";
+        return false;
+    }
+
+    const auto* pTimeAlloc = reg.getParam("Time_MoveAllocationDivisor");
+    if (!pTimeAlloc || pTimeAlloc->getInt() != 20 || std::get<int64_t>(pTimeAlloc->minValue) != 5 || std::get<int64_t>(pTimeAlloc->maxValue) != 100) {
+        std::cerr << "[FAIL] Gate Omega 6-A: Time_MoveAllocationDivisor descriptor incorrect\n";
+        return false;
+    }
+
+    EngineParameters ep;
+    reg.syncToEngineParameters(ep);
+    if (ep.search.nmpReduction != 2 || ep.search.nmpMinDepth != 3 ||
+        std::abs(ep.search.lmrBase - 0.5) > 1e-6 || std::abs(ep.search.lmrDivisor - 1.95) > 1e-6 ||
+        ep.search.aspirationInitialDelta != 30 || ep.time.allocDivisor != 20) {
+        std::cerr << "[FAIL] Gate Omega 6-A: syncToEngineParameters failed to copy defaults\n";
+        return false;
+    }
+
+    return true;
+}
+
+bool testGateOmega6B_ValidAndInvalidMutations() {
+    auto& reg = ParameterRegistry::getInstance();
+    reg.resetToDefaults();
+
+    if (!reg.setParam("NMP_BaseReduction", int64_t{4})) {
+        std::cerr << "[FAIL] Gate Omega 6-B: Failed valid mutation NMP_BaseReduction=4\n";
+        return false;
+    }
+    if (reg.getInt("NMP_BaseReduction") != 4) return false;
+
+    if (reg.setParam("NMP_BaseReduction", int64_t{0})) {
+        std::cerr << "[FAIL] Gate Omega 6-B: Accepted out-of-bounds lower value 0\n";
+        return false;
+    }
+    if (reg.getInt("NMP_BaseReduction") != 4) return false;
+
+    if (reg.setParam("NMP_BaseReduction", int64_t{7})) {
+        std::cerr << "[FAIL] Gate Omega 6-B: Accepted out-of-bounds upper value 7\n";
+        return false;
+    }
+    if (reg.getInt("NMP_BaseReduction") != 4) return false;
+
+    if (reg.setParam("NMP_BaseReduction", 2.5)) {
+        std::cerr << "[FAIL] Gate Omega 6-B: Accepted wrong variant type (double for int)\n";
+        return false;
+    }
+
+    if (reg.setParam("NonExistent_Param", int64_t{10})) {
+        std::cerr << "[FAIL] Gate Omega 6-B: Accepted nonexistent param\n";
+        return false;
+    }
+
+    if (!reg.setParam("Hash", int64_t{1024})) return false;
+    if (reg.getInt("Hash") != 1024) return false;
+    if (reg.setParam("Hash", int64_t{0})) return false;
+    if (reg.setParam("Hash", int64_t{70000})) return false;
+    if (reg.getInt("Hash") != 1024) return false;
+
+    reg.resetToDefaults();
+    if (reg.getInt("NMP_BaseReduction") != 2 || reg.getInt("Hash") != 16) {
+        std::cerr << "[FAIL] Gate Omega 6-B: resetToDefaults failed\n";
+        return false;
+    }
+
+    return true;
+}
+
+bool testGateOmega6C_StringParsing() {
+    auto& reg = ParameterRegistry::getInstance();
+    reg.resetToDefaults();
+
+    if (!reg.setParamFromString("LMR_Base", "0.75")) return false;
+    if (std::abs(reg.getDouble("LMR_Base") - 0.75) > 1e-6) return false;
+    if (reg.setParamFromString("LMR_Base", "-0.1")) return false;
+    if (reg.setParamFromString("LMR_Base", "3.5")) return false;
+    if (reg.setParamFromString("LMR_Base", "abc")) return false;
+    if (reg.setParamFromString("LMR_Base", "0.75abc")) return false;
+
+    if (!reg.setParamFromString("Enable_NMP", "false")) return false;
+    if (reg.getBool("Enable_NMP") != false) return false;
+    if (!reg.setParamFromString("Enable_NMP", "true")) return false;
+    if (reg.getBool("Enable_NMP") != true) return false;
+    if (!reg.setParamFromString("Enable_NMP", "0")) return false;
+    if (reg.getBool("Enable_NMP") != false) return false;
+    if (!reg.setParamFromString("Enable_NMP", "1")) return false;
+    if (reg.getBool("Enable_NMP") != true) return false;
+    if (reg.setParamFromString("Enable_NMP", "invalid_bool")) return false;
+
+    if (!reg.setParamFromString("NMP_BaseReduction", "5")) return false;
+    if (reg.getInt("NMP_BaseReduction") != 5) return false;
+    if (reg.setParamFromString("NMP_BaseReduction", "99")) return false;
+    if (reg.setParamFromString("NMP_BaseReduction", "xyz")) return false;
+
+    reg.resetToDefaults();
+    return true;
+}
+
+bool testGateOmega6D_UciEmissionFormatting() {
+    auto& reg = ParameterRegistry::getInstance();
+    reg.resetToDefaults();
+
+    std::ostringstream oss;
+    reg.printUciOptions(oss);
+    std::string uciStr = oss.str();
+
+    const char* expectedSubstrings[] = {
+        "option name Hash type spin default 16 min 1 max 65536",
+        "option name NMP_BaseReduction type spin default 2 min 1 max 6",
+        "option name NMP_DepthDivisor type spin default 3 min 1 max 10",
+        "option name LMR_Base type string default 0.5",
+        "option name LMR_Divisor type string default 1.95",
+        "option name Aspiration_InitialWindow type spin default 30 min 5 max 200",
+        "option name History_MaxScore type spin default 16384 min 256 max 65536",
+        "option name Time_MoveAllocationDivisor type spin default 20 min 5 max 100",
+        "option name Enable_NMP type check default true"
+    };
+
+    for (const char* sub : expectedSubstrings) {
+        if (uciStr.find(sub) == std::string::npos) {
+            std::cerr << "[FAIL] Gate Omega 6-D: Missing expected UCI option line: " << sub << "\n";
+            return false;
+        }
+    }
+
+    std::string json = reg.serializeJson();
+    if (json.find("\"schemaVersion\": \"1.0.0\"") == std::string::npos ||
+        json.find("\"name\": \"Hash\"") == std::string::npos ||
+        json.find("\"name\": \"NMP_BaseReduction\"") == std::string::npos) {
+        std::cerr << "[FAIL] Gate Omega 6-D: Missing expected JSON structure\n";
+        return false;
+    }
+
+    return true;
+}
+
+bool testGateOmega6E_SetOptionAndResetDispatch() {
+    auto& reg = ParameterRegistry::getInstance();
+    reg.resetToDefaults();
+    reg.resetClearTTCount();
+
+    if (!reg.handleUciCommand("setoption name hash value 32")) {
+        std::cerr << "[FAIL] Gate Omega 6-E: Failed case-insensitive 'setoption name hash value 32'\n";
+        return false;
+    }
+    if (reg.getInt("Hash") != 32) return false;
+
+    if (!reg.handleUciCommand("setoption name NMP_BASEREDUCTION value 4")) return false;
+    if (reg.getInt("NMP_BaseReduction") != 4) return false;
+
+    if (!reg.handleUciCommand("setoption name nmp_depthdivisor value 5")) return false;
+    if (reg.getInt("NMP_DepthDivisor") != 5) return false;
+
+    if (!reg.handleUciCommand("setoption name lmr_base value 0.75")) return false;
+    if (std::abs(reg.getDouble("LMR_Base") - 0.75) > 1e-6) return false;
+
+    uint64_t countBefore = reg.getClearTTCount();
+    if (countBefore == 0) {
+        std::cerr << "[FAIL] Gate Omega 6-E: Hash mutation did not trigger TT clear\n";
+        return false;
+    }
+
+    if (!reg.handleUciCommand("setoption name NMP_BaseReduction value 3")) return false;
+    if (reg.getClearTTCount() != countBefore) {
+        std::cerr << "[FAIL] Gate Omega 6-E: Non-reset param triggered unexpected TT clear\n";
+        return false;
+    }
+
+    if (!reg.handleUciCommand("setoption name Hash value 64")) return false;
+    if (reg.getClearTTCount() != countBefore + 1) {
+        std::cerr << "[FAIL] Gate Omega 6-E: Second Hash mutation did not trigger TT clear\n";
+        return false;
+    }
+
+    if (reg.handleUciCommand("setoption name Hash value 999999")) {
+        std::cerr << "[FAIL] Gate Omega 6-E: Accepted out-of-bounds Hash value via setoption\n";
+        return false;
+    }
+
+    if (reg.handleUciCommand("setoption name UnknownOption value 123")) {
+        std::cerr << "[FAIL] Gate Omega 6-E: Accepted unknown option via setoption\n";
+        return false;
+    }
+
+    reg.resetToDefaults();
+    return true;
+}
+
+bool testGateOmega6F_CliOverrideParsing() {
+    std::string name, val;
+
+    if (!ParameterRegistry::parseCliParam("Hash=64", name, val) || name != "Hash" || val != "64") {
+        std::cerr << "[FAIL] Gate Omega 6-F: Failed parsing 'Hash=64'\n";
+        return false;
+    }
+    if (!ParameterRegistry::parseCliParam("--param=NMP_BaseReduction=4", name, val) || name != "NMP_BaseReduction" || val != "4") {
+        std::cerr << "[FAIL] Gate Omega 6-F: Failed parsing '--param=NMP_BaseReduction=4'\n";
+        return false;
+    }
+    if (!ParameterRegistry::parseCliParam("LMR_Base=1.2", name, val) || name != "LMR_Base" || val != "1.2") {
+        std::cerr << "[FAIL] Gate Omega 6-F: Failed parsing 'LMR_Base=1.2'\n";
+        return false;
+    }
+
+    if (ParameterRegistry::parseCliParam("NoEqualsSign", name, val)) return false;
+    if (ParameterRegistry::parseCliParam("=NoName", name, val)) return false;
+    if (ParameterRegistry::parseCliParam("NoValue=", name, val)) return false;
+    if (ParameterRegistry::parseCliParam("", name, val)) return false;
+
+    return true;
+}
+
+bool testGateOmega6G_DeterministicBaselinePreservation() {
+    auto& reg = ParameterRegistry::getInstance();
+    reg.resetToDefaults();
+    reg.syncToEngineParameters(SearchController::getInstance().getMutableParams());
+
+    struct LocalCoutSilencer {
+        std::streambuf* origBuf;
+        std::ostringstream dummy;
+        explicit LocalCoutSilencer() : origBuf(std::cout.rdbuf(dummy.rdbuf())) {}
+        ~LocalCoutSilencer() { std::cout.rdbuf(origBuf); }
+    };
+
+    // 1. Startpos depth 6 verification (expected: 25,210 nodes)
+    const std::string startpos = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+    auto optStart = FenParser::parse(startpos);
+    if (!optStart) return false;
+    Position startPos = *optStart;
+
+    {
+        LocalCoutSilencer silencer;
+        BenchmarkRunner::resetSearchState(16);
+        SearchLimits limits;
+        limits.depth = 6;
+        limits.clearTables = true;
+        Search::runSearch(startPos, limits);
+    }
+
+    uint64_t startNodes = SearchController::getInstance().getStats().nodes + SearchController::getInstance().getStats().qNodes;
+    if (startNodes != 25210) {
+        std::cerr << "[FAIL] Gate Omega 6-G: Startpos depth 6 nodes " << startNodes << " != 25210\n";
+        return false;
+    }
+
+    // 2. KiwiPete depth 6 verification (expected: 154,823 nodes)
+    const std::string kiwipete = "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1";
+    auto optKiwi = FenParser::parse(kiwipete);
+    if (!optKiwi) return false;
+    Position kiwiPos = *optKiwi;
+
+    {
+        LocalCoutSilencer silencer;
+        BenchmarkRunner::resetSearchState(16);
+        SearchLimits limits;
+        limits.depth = 6;
+        limits.clearTables = true;
+        Search::runSearch(kiwiPos, limits);
+    }
+
+    uint64_t kiwiNodes = SearchController::getInstance().getStats().nodes + SearchController::getInstance().getStats().qNodes;
+    if (kiwiNodes != 154823) {
+        std::cerr << "[FAIL] Gate Omega 6-G: KiwiPete depth 6 nodes " << kiwiNodes << " != 154823\n";
+        return false;
+    }
+
+    // 3. Full benchmark suite (6 canonical positions at depth 6) == 495,749 nodes
+    BenchmarkConfig cfg;
+    cfg.overrideDepth = 6;
+    cfg.hashSizeMb = 16;
+    cfg.mode = BenchmarkStateMode::Isolated;
+    cfg.silentSearch = true;
+    cfg.printConsole = false;
+    BenchmarkRunRecord rec = BenchmarkRunner::run(cfg);
+
+    if (rec.aggregate.totalNodes != 495749) {
+        std::cerr << "[FAIL] Gate Omega 6-G: Aggregate benchmark depth 6 nodes "
+                  << rec.aggregate.totalNodes << " != 495749\n";
+        return false;
+    }
+
+    return true;
+}
+
+bool runMilestoneOmegaPhase6ParameterRegistryTests() {
+    std::cout << "\n=================================================================\n";
+    std::cout << "===  MILESTONE OMEGA, PHASE 6: PARAMETER REGISTRY & UCI TESTS ===\n";
+    std::cout << "=================================================================\n";
+
+    int passed = 0;
+    int total = 7;
+
+    bool passA = testGateOmega6A_RegistryInitializationAndDefaults();
+    std::cout << "[" << (passA ? "PASS" : "FAIL") << "] Omega 6-A: Parameter Registry Defaults & Initialization\n";
+    if (passA) passed++;
+
+    bool passB = testGateOmega6B_ValidAndInvalidMutations();
+    std::cout << "[" << (passB ? "PASS" : "FAIL") << "] Omega 6-B: Parameter Bounds Validation & Mutations\n";
+    if (passB) passed++;
+
+    bool passC = testGateOmega6C_StringParsing();
+    std::cout << "[" << (passC ? "PASS" : "FAIL") << "] Omega 6-C: String Parsing for Numeric and Boolean Types\n";
+    if (passC) passed++;
+
+    bool passD = testGateOmega6D_UciEmissionFormatting();
+    std::cout << "[" << (passD ? "PASS" : "FAIL") << "] Omega 6-D: UCI Option Formatting & JSON Serialization\n";
+    if (passD) passed++;
+
+    bool passE = testGateOmega6E_SetOptionAndResetDispatch();
+    std::cout << "[" << (passE ? "PASS" : "FAIL") << "] Omega 6-E: UCI setoption Command & TT Reset Dispatch\n";
+    if (passE) passed++;
+
+    bool passF = testGateOmega6F_CliOverrideParsing();
+    std::cout << "[" << (passF ? "PASS" : "FAIL") << "] Omega 6-F: CLI Override Format & Spec Validation\n";
+    if (passF) passed++;
+
+    bool passG = testGateOmega6G_DeterministicBaselinePreservation();
+    std::cout << "[" << (passG ? "PASS" : "FAIL") << "] Omega 6-G: Deterministic Node Baseline Preservation (495,749 nodes)\n";
+    if (passG) passed++;
+
+    std::cout << "\n=================================================================\n";
+    std::cout << "MILESTONE OMEGA PHASE 6 RESULT: " << passed << "/" << total << " Test Categories Passed.\n";
+    std::cout << "=================================================================\n";
+
+    return (passed == total);
+}
+
 void runDiagnostics() {
     std::cout << "\n==================================================\n";
     std::cout << "===   EXECUTING BOSON SUBSYSTEM DIAGNOSTICS   ===\n";
@@ -4267,6 +4661,7 @@ int main() {
     bool omegaPhase3Success = Boson::runMilestoneOmegaPhase3IntegrityTests();
     bool omegaPhase4Success = Boson::runMilestoneOmegaPhase4BenchmarkTests();
     bool omegaPhase5Success = Boson::runMilestoneOmegaPhase5StrengthTests();
+    bool omegaPhase6Success = Boson::runMilestoneOmegaPhase6ParameterRegistryTests();
     Boson::runDiagnostics();
-    return (m1Phase2Success && m1Module13Success && m2PhasesBCSuccess && m2PerftSuccess && phaseYZSuccess && phaseAASuccess && phaseABSuccess && m6Phase12Success && m6Module63Success && m6Module64Success && m6Module65Success && m6Module66Success && m6Module67Success && m6Module68Success && m6Module69Success && m6Module610Success && omegaPhase1Success && omegaPhase2Success && omegaPhase3Success && omegaPhase4Success && omegaPhase5Success) ? 0 : 1;
+    return (m1Phase2Success && m1Module13Success && m2PhasesBCSuccess && m2PerftSuccess && phaseYZSuccess && phaseAASuccess && phaseABSuccess && m6Phase12Success && m6Module63Success && m6Module64Success && m6Module65Success && m6Module66Success && m6Module67Success && m6Module68Success && m6Module69Success && m6Module610Success && omegaPhase1Success && omegaPhase2Success && omegaPhase3Success && omegaPhase4Success && omegaPhase5Success && omegaPhase6Success) ? 0 : 1;
 }
