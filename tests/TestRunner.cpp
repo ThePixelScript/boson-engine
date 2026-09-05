@@ -33,6 +33,15 @@
 #include "benchmark/BenchmarkCorpus.hpp"
 #include "benchmark/BenchmarkRunner.hpp"
 #include "benchmark/BenchmarkReporter.hpp"
+#include "strength/StrengthTypes.hpp"
+#include "strength/Statistics.hpp"
+#include "strength/Statistics.cpp"
+#include "strength/OpeningBook.hpp"
+#include "strength/OpeningBook.cpp"
+#include "strength/MatchRunner.hpp"
+#include "strength/MatchRunner.cpp"
+#include "strength/StrengthReporter.hpp"
+#include "strength/StrengthReporter.cpp"
 
 namespace Boson {
 
@@ -3864,6 +3873,185 @@ bool runMilestoneOmegaPhase4BenchmarkTests() {
     return (passed == total);
 }
 
+// ---------------------------------------------------------------------------
+// Milestone Omega Phase 5: Strength & Elo Validation Harness Integration
+// ---------------------------------------------------------------------------
+
+bool testGateOmega5D_StatisticalCorrectness() {
+    // 1. 0W / 0D / 100L
+    MatchStatistics s1 = Statistics::computeStatistics(0, 0, 100);
+    if (s1.score != 0.0) { std::cerr << "[DEBUG 5D] 1.1 failed: score=" << s1.score << "\n"; return false; }
+    if (s1.sampleVariance != 0.0) { std::cerr << "[DEBUG 5D] 1.2 failed: var=" << s1.sampleVariance << "\n"; return false; }
+    if (std::abs(s1.scoreLow - 0.005) > 1e-6 || std::abs(s1.scoreHigh - 0.005) > 1e-6) {
+        std::cerr << "[DEBUG 5D] 1.3 failed: low=" << s1.scoreLow << ", high=" << s1.scoreHigh << "\n"; return false;
+    }
+    if (s1.deltaElo >= -800.0) { std::cerr << "[DEBUG 5D] 1.4 failed: elo=" << s1.deltaElo << "\n"; return false; }
+    if (s1.sprt.llr >= 0.0) { std::cerr << "[DEBUG 5D] 1.5 failed: llr=" << s1.sprt.llr << "\n"; return false; }
+    // SPRT transition: at 150 losses, LLR <= -2.944 (AcceptH0)
+    MatchStatistics s1_150 = Statistics::computeStatistics(0, 0, 150);
+    if (s1_150.sprt.decision != SPRTDecision::AcceptH0) {
+        std::cerr << "[DEBUG 5D] 1.6 failed: dec=" << (int)s1_150.sprt.decision << ", llr=" << s1_150.sprt.llr << "\n"; return false;
+    }
+
+    // 2. 0W / 100D / 0L
+    MatchStatistics s2 = Statistics::computeStatistics(0, 100, 0);
+    if (s2.score != 0.5) { std::cerr << "[DEBUG 5D] 2.1 failed\n"; return false; }
+    if (s2.sampleVariance != 0.0) { std::cerr << "[DEBUG 5D] 2.2 failed: var=" << s2.sampleVariance << "\n"; return false; }
+    if (std::abs(s2.scoreLow - 0.5) > 1e-6 || std::abs(s2.scoreHigh - 0.5) > 1e-6) { std::cerr << "[DEBUG 5D] 2.3 failed\n"; return false; }
+    if (std::abs(s2.deltaElo) > 1e-6) { std::cerr << "[DEBUG 5D] 2.4 failed\n"; return false; }
+    if (std::abs(s2.eloLow) > 1e-6 || std::abs(s2.eloHigh) > 1e-6) { std::cerr << "[DEBUG 5D] 2.5 failed\n"; return false; }
+
+    // 3. 50W / 0D / 50L
+    MatchStatistics s3 = Statistics::computeStatistics(50, 0, 50);
+    if (s3.score != 0.5) { std::cerr << "[DEBUG 5D] 3.1 failed\n"; return false; }
+    if (std::abs(s3.sampleVariance - (25.0 / 99.0)) > 1e-5) { std::cerr << "[DEBUG 5D] 3.2 failed: var=" << s3.sampleVariance << "\n"; return false; }
+    if (std::abs(s3.deltaElo) > 1e-6) { std::cerr << "[DEBUG 5D] 3.3 failed\n"; return false; }
+    if (s3.eloLow >= 0.0 || s3.eloHigh <= 0.0) { std::cerr << "[DEBUG 5D] 3.4 failed\n"; return false; }
+    if (std::abs(s3.eloLow + s3.eloHigh) > 1e-4) { std::cerr << "[DEBUG 5D] 3.5 failed\n"; return false; }
+
+    // 4. 100W / 0D / 0L
+    MatchStatistics s4 = Statistics::computeStatistics(100, 0, 0);
+    if (s4.score != 1.0) { std::cerr << "[DEBUG 5D] 4.1 failed\n"; return false; }
+    if (s4.sampleVariance != 0.0) { std::cerr << "[DEBUG 5D] 4.2 failed\n"; return false; }
+    if (std::abs(s4.scoreLow - 0.995) > 1e-6 || std::abs(s4.scoreHigh - 0.995) > 1e-6) { std::cerr << "[DEBUG 5D] 4.3 failed\n"; return false; }
+    if (s4.deltaElo <= 800.0) { std::cerr << "[DEBUG 5D] 4.4 failed\n"; return false; }
+    if (s4.sprt.llr <= 0.0) { std::cerr << "[DEBUG 5D] 4.5 failed\n"; return false; }
+    // SPRT transition: at 150 wins, LLR >= +2.944 (AcceptH1)
+    MatchStatistics s4_150 = Statistics::computeStatistics(150, 0, 0);
+    if (s4_150.sprt.decision != SPRTDecision::AcceptH1) { std::cerr << "[DEBUG 5D] 4.6 failed\n"; return false; }
+
+    // 5. Mixed: 45W / 30D / 25L
+    MatchStatistics s5 = Statistics::computeStatistics(45, 30, 25);
+    if (std::abs(s5.score - 0.60) > 1e-6) { std::cerr << "[DEBUG 5D] 5.1 failed\n"; return false; }
+    if (s5.sampleVariance <= 0.0) { std::cerr << "[DEBUG 5D] 5.2 failed\n"; return false; }
+    if (s5.deltaElo <= 0.0) { std::cerr << "[DEBUG 5D] 5.3 failed\n"; return false; }
+    if (s5.scoreLow >= s5.score || s5.score >= s5.scoreHigh) { std::cerr << "[DEBUG 5D] 5.4 failed\n"; return false; }
+    if (s5.eloLow >= s5.deltaElo || s5.deltaElo >= s5.eloHigh) { std::cerr << "[DEBUG 5D] 5.5 failed\n"; return false; }
+
+    return true;
+}
+
+bool testGateOmega5E_OpeningBookIntegrity() {
+    if (OpeningBook::getVersion() != "1.0.0") return false;
+    auto openings = OpeningBook::getOpenings();
+    if (openings.size() != 20) return false;
+
+    for (size_t i = 0; i < openings.size(); ++i) {
+        const auto& op = openings[i];
+        if (op.id.empty() || op.family.empty() || op.name.empty()) return false;
+        if (op.moveSequence.empty()) return false;
+        auto parsed = FenParser::parse(op.resultingFen);
+        if (!parsed) {
+            std::cerr << "[FAIL] Gate Omega 5-E: Invalid FEN in opening " << op.id << "\n";
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool testGateOmega5ABC_MatchRunnerSmokeTest() {
+    MatchConfig cfg;
+    cfg.engineA = "Boson-A";
+    cfg.engineB = "Boson-B";
+    cfg.totalGames = 2;
+    cfg.fixedDepth = 2; // depth 2 search is ultra-fast (<150ms per move) and fully deterministic
+    cfg.maxPlies = 60;
+
+    MatchRecord rec = MatchRunner::runMatch(cfg);
+
+    // Gate Omega 5-A: Protocol Compliance & Pure UCI Interchange
+    if (rec.games.size() != 2) return false;
+    for (const auto& g : rec.games) {
+        if (g.termination == TerminationType::ProtocolError ||
+            g.termination == TerminationType::EngineCrash ||
+            g.termination == TerminationType::Timeout ||
+            g.termination == TerminationType::IllegalMove) {
+            std::cerr << "[FAIL] Match game ended with abnormal termination: "
+                      << terminationToString(g.termination) << "\n";
+            return false;
+        }
+    }
+
+    // Gate Omega 5-B: Color Symmetry & Paired Openings
+    if (rec.games[0].whiteEngine != "Boson-A" || rec.games[0].blackEngine != "Boson-B") return false;
+    if (rec.games[1].whiteEngine != "Boson-B" || rec.games[1].blackEngine != "Boson-A") return false;
+    if (rec.games[0].openingId != rec.games[1].openingId) return false;
+
+    // Gate Omega 5-C: Adjudication Integrity
+    if (rec.stats.totalGames != 2) return false;
+    if (rec.stats.wins + rec.stats.draws + rec.stats.losses != 2) return false;
+    for (const auto& g : rec.games) {
+        if (g.plyCount < 6) return false;
+    }
+
+    return true;
+}
+
+bool testGateOmega5F_ReportingAndJsonParity() {
+    MatchConfig cfg;
+    cfg.engineA = "Boson-A";
+    cfg.engineB = "Boson-B";
+    cfg.totalGames = 2;
+    cfg.fixedDepth = 2;
+    cfg.maxPlies = 60;
+
+    MatchRecord rec = MatchRunner::runMatch(cfg);
+    std::string json = StrengthReporter::serializeJson(rec);
+
+    if (json.find("\"schemaVersion\": \"1.0.0\"") == std::string::npos) return false;
+    if (json.find("\"matchConfig\": {") == std::string::npos) return false;
+    if (json.find("\"statistics\": {") == std::string::npos) return false;
+    if (json.find("\"games\": [") == std::string::npos) return false;
+
+    std::string parsedSchema;
+    uint32_t parsedTotalGames = 0;
+    double parsedScore = 0.0;
+    double parsedDeltaElo = 0.0;
+
+    if (!StrengthReporter::parseJsonParity(json, parsedSchema, parsedTotalGames, parsedScore, parsedDeltaElo)) {
+        std::cerr << "[FAIL] Gate Omega 5-F: JSON parity parsing failed\n";
+        return false;
+    }
+
+    if (parsedSchema != "1.0.0" || parsedTotalGames != 2) return false;
+    if (std::abs(parsedScore - rec.stats.score) > 1e-4) return false;
+    if (std::abs(parsedDeltaElo - rec.stats.deltaElo) > 1e-2) return false;
+
+    return true;
+}
+
+bool runMilestoneOmegaPhase5StrengthTests() {
+    std::cout << "\n=================================================================\n";
+    std::cout << "===   MILESTONE OMEGA, PHASE 5: STRENGTH & ELO HARNESS TESTS  ===\n";
+    std::cout << "=================================================================\n";
+
+    int passed = 0;
+    int total = 4;
+
+    bool passD = testGateOmega5D_StatisticalCorrectness();
+    std::cout << "[" << (passD ? "PASS" : "FAIL") << "] Omega 5-D: Statistical Correctness & SPRT Transitions\n";
+    if (passD) passed++;
+
+    bool passE = testGateOmega5E_OpeningBookIntegrity();
+    std::cout << "[" << (passE ? "PASS" : "FAIL") << "] Omega 5-E: Opening Book Coverage & FEN Validation (20 Lines)\n";
+    if (passE) passed++;
+
+    bool passABC = testGateOmega5ABC_MatchRunnerSmokeTest();
+    std::cout << "[" << (passABC ? "PASS" : "FAIL") << "] Omega 5-A/B/C: Protocol Compliance, Color Symmetry & Adjudication\n";
+    if (passABC) passed++;
+
+    bool passF = testGateOmega5F_ReportingAndJsonParity();
+    std::cout << "[" << (passF ? "PASS" : "FAIL") << "] Omega 5-F: Dual Reporting & JSON Serialization Round-Trip Parity\n";
+    if (passF) passed++;
+
+    std::cout << "\n=================================================================\n";
+    std::cout << "MILESTONE OMEGA PHASE 5 RESULT: " << passed << "/" << total << " Test Categories Passed.\n";
+    std::cout << "=================================================================\n";
+
+    return (passed == total);
+}
+
 void runDiagnostics() {
     std::cout << "\n==================================================\n";
     std::cout << "===   EXECUTING BOSON SUBSYSTEM DIAGNOSTICS   ===\n";
@@ -3930,6 +4118,7 @@ int main() {
     bool omegaPhase2Success = Boson::runMilestoneOmegaPhase2TacticalTests();
     bool omegaPhase3Success = Boson::runMilestoneOmegaPhase3IntegrityTests();
     bool omegaPhase4Success = Boson::runMilestoneOmegaPhase4BenchmarkTests();
+    bool omegaPhase5Success = Boson::runMilestoneOmegaPhase5StrengthTests();
     Boson::runDiagnostics();
-    return (m1Phase2Success && m1Module13Success && m2PhasesBCSuccess && m2PerftSuccess && phaseYZSuccess && phaseAASuccess && phaseABSuccess && m6Phase12Success && m6Module63Success && m6Module64Success && m6Module65Success && m6Module66Success && m6Module67Success && m6Module68Success && m6Module69Success && m6Module610Success && omegaPhase1Success && omegaPhase2Success && omegaPhase3Success && omegaPhase4Success) ? 0 : 1;
+    return (m1Phase2Success && m1Module13Success && m2PhasesBCSuccess && m2PerftSuccess && phaseYZSuccess && phaseAASuccess && phaseABSuccess && m6Phase12Success && m6Module63Success && m6Module64Success && m6Module65Success && m6Module66Success && m6Module67Success && m6Module68Success && m6Module69Success && m6Module610Success && omegaPhase1Success && omegaPhase2Success && omegaPhase3Success && omegaPhase4Success && omegaPhase5Success) ? 0 : 1;
 }
