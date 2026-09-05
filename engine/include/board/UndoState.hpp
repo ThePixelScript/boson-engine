@@ -1,6 +1,7 @@
 #ifndef BOSON_UNDO_STATE_HPP
 #define BOSON_UNDO_STATE_HPP
 
+#include <cstdint>
 #include "Square.hpp"
 #include "Castling.hpp"
 #include "Piece.hpp"
@@ -16,6 +17,7 @@ struct UndoState {
     Square castlingRookFrom{Square::None};
     Square castlingRookTo{Square::None};
     Piece castlingRookPiece{Piece::None};
+    uint64_t hashKey{0ULL};
 };
 
 } // namespace Boson

@@ -29,6 +29,8 @@ public:
 
     void store(uint64_t key, int score, Move bestMove, int depth, TTNodeType type, uint8_t generation) noexcept;
     bool probe(uint64_t key, int& score, Move& bestMove, int& depth, TTNodeType& type, int alpha, int beta) noexcept;
+    bool probeEntry(uint64_t key, int& score, Move& bestMove, int& depth, TTNodeType& type) noexcept;
+    void recordCutoff() noexcept { m_cutoffs++; }
 
     // Instrumentation Metrics
     uint64_t getProbes() const noexcept { return m_probes; }

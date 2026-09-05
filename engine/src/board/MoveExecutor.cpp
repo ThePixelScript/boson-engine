@@ -1,5 +1,3 @@
-#pragma warning(push)
-#pragma warning(disable : 4189)
 #include "board/MoveExecutor.hpp"
 #include <cassert>
 
@@ -43,19 +41,8 @@ CastlingRookMove castlingRookMoveFor(Square kingTo, Color us) noexcept {
 
 void relocateCastlingRook(Position& pos, const CastlingRookMove& rookMove) noexcept {
     if (rookMove.from == Square::None || rookMove.piece == Piece::None) return;
-    // clearPieceBit and setPieceBit handle their own Zobrist toggling safely
     pos.clearPieceBit(rookMove.from, rookMove.piece);
     pos.setPieceBit(rookMove.to, rookMove.piece);
-}
-
-void verifyCastlingRookRestored(const Position& pos, Square homeSquare, Piece rookPiece) noexcept {
-    if (homeSquare == Square::None || rookPiece == Piece::None) {
-        assert(false && "castling undo missing rook metadata");
-        return;
-    }
-    if ((pos.getPieceBitboard(rookPiece) & (1ULL << static_cast<size_t>(homeSquare))) == 0) {
-        assert(false && "castling undo failed to restore rook home square");
-    }
 }
 
 } // namespace
@@ -69,6 +56,7 @@ void MoveExecutor::makeMove(Position& pos, const Move& move, UndoState& undoStat
     const Bitboard fromBit = 1ULL << static_cast<size_t>(from);
     const Bitboard toBit = 1ULL << static_cast<size_t>(to);
 
+    // Step 1: Save UndoState snapshot
     undoState.castlingRights = pos.getCastlingRights();
     undoState.enPassantSquare = pos.getEnPassantSquare();
     undoState.halfmoveClock = pos.getHalfmoveClock();
@@ -76,7 +64,9 @@ void MoveExecutor::makeMove(Position& pos, const Move& move, UndoState& undoStat
     undoState.castlingRookFrom = Square::None;
     undoState.castlingRookTo = Square::None;
     undoState.castlingRookPiece = Piece::None;
+    undoState.hashKey = pos.getHashKey();
 
+    // Step 2: Remove moving piece from source square
     Piece movingPiece = Piece::None;
     for (uint8_t p = 0; p < 12; ++p) {
         if (pos.getPieceBitboard(static_cast<Piece>(p)) & fromBit) {
@@ -85,9 +75,9 @@ void MoveExecutor::makeMove(Position& pos, const Move& move, UndoState& undoStat
         }
     }
     undoState.movingPiece = movingPiece;
+    pos.clearPieceBit(from, movingPiece);
 
-    pos.clearPieceBit(from, movingPiece); // Toggles hash once internally
-
+    // Step 3: Remove captured piece
     if (move.isEnPassant()) {
         Square victimSq = (us == Color::White)
             ? static_cast<Square>(static_cast<int>(to) - 8)
@@ -104,6 +94,7 @@ void MoveExecutor::makeMove(Position& pos, const Move& move, UndoState& undoStat
         }
     }
 
+    // Step 4: Place moving piece on destination square
     if (move.isPromotion()) {
         auto promoType = move.getPromotionPiece();
         Piece promoPiece = promotionPieceFromMove(us, promoType);
@@ -120,6 +111,10 @@ void MoveExecutor::makeMove(Position& pos, const Move& move, UndoState& undoStat
         relocateCastlingRook(pos, rookMove);
     }
 
+    // Step 5: Update occupancies & king square caches
+    pos.updateOccupancy();
+
+    // Step 6: Update game state & clocks
     uint8_t rightsRaw = static_cast<uint8_t>(pos.getCastlingRights());
 
     if (movingPiece == Piece::WhiteKing) {
@@ -151,13 +146,17 @@ void MoveExecutor::makeMove(Position& pos, const Move& move, UndoState& undoStat
         pos.setHalfmoveClock(static_cast<uint16_t>(pos.getHalfmoveClock() + 1));
     }
 
-    pos.updateOccupancy();
-    pos.setSideToMove(them);
-    pos.toggleSideHash(); // Keeps tracking turn changes correctly
-
     if (us == Color::Black) {
         pos.setFullmoveNumber(pos.getFullmoveNumber() + 1);
     }
+
+    // Step 7: Switch side to move
+    pos.setSideToMove(them);
+    pos.toggleSideHash();
+
+    // Position invariant assertions (compiled out in Release builds via NDEBUG)
+    assert((pos.getColorOccupancy(Color::White) | pos.getColorOccupancy(Color::Black)) == pos.getTotalOccupancy());
+    assert((pos.getColorOccupancy(Color::White) & pos.getColorOccupancy(Color::Black)) == 0ULL);
 }
 
 void MoveExecutor::undoMove(Position& pos, const Move& move, const UndoState& undoState) noexcept {
@@ -166,6 +165,7 @@ void MoveExecutor::undoMove(Position& pos, const Move& move, const UndoState& un
     const Color currentSide = pos.getSideToMove();
     const Color originalUs = (currentSide == Color::White) ? Color::Black : Color::White;
 
+    // Step 1: Revert side to move & fullmove number
     if (originalUs == Color::Black) {
         pos.setFullmoveNumber(pos.getFullmoveNumber() - 1);
     }
@@ -173,6 +173,7 @@ void MoveExecutor::undoMove(Position& pos, const Move& move, const UndoState& un
     pos.setSideToMove(originalUs);
     pos.toggleSideHash(); 
 
+    // Step 2: Revert piece placement
     if (move.isCastling()) {
         pos.clearPieceBit(undoState.castlingRookTo, undoState.castlingRookPiece);
         pos.setPieceBit(undoState.castlingRookFrom, undoState.castlingRookPiece);
@@ -187,6 +188,7 @@ void MoveExecutor::undoMove(Position& pos, const Move& move, const UndoState& un
 
     pos.setPieceBit(from, undoState.movingPiece);
 
+    // Step 3: Revert captured piece
     if (move.isEnPassant()) {
         Square victimSq = static_cast<Square>((originalUs == Color::White) ? (static_cast<int>(to) - 8) : (static_cast<int>(to) + 8));
         pos.setPieceBit(victimSq, undoState.capturedPiece);
@@ -194,10 +196,26 @@ void MoveExecutor::undoMove(Position& pos, const Move& move, const UndoState& un
         pos.setPieceBit(to, undoState.capturedPiece);
     }
 
+    // Step 4: Restore game state & clocks
     pos.setCastlingRights(undoState.castlingRights);
     pos.setEnPassantSquare(undoState.enPassantSquare);
     pos.setHalfmoveClock(static_cast<uint16_t>(undoState.halfmoveClock));
+
+    // Step 5: Update occupancies & king square caches
     pos.updateOccupancy();
+
+    // Verification: Hash key symmetry and position invariants
+    assert(pos.getHashKey() == undoState.hashKey && "Hash key desynchronized after undoMove");
+    assert((pos.getColorOccupancy(Color::White) | pos.getColorOccupancy(Color::Black)) == pos.getTotalOccupancy());
+    assert((pos.getColorOccupancy(Color::White) & pos.getColorOccupancy(Color::Black)) == 0ULL);
+}
+
+void MoveExecutor::makeNullMove(Position& pos, UndoState& undoState) noexcept {
+    pos.makeNullMove(undoState);
+}
+
+void MoveExecutor::undoNullMove(Position& pos, const UndoState& undoState) noexcept {
+    pos.undoNullMove(undoState);
 }
 
 } // namespace Boson

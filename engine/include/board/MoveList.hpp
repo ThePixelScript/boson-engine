@@ -24,7 +24,19 @@ public:
     constexpr const Move& operator[](size_t index) const noexcept { return m_storage[index]; }
     
     constexpr size_t size() const noexcept { return m_count; }
+    constexpr bool empty() const noexcept { return m_count == 0; }
+    constexpr size_t capacity() const noexcept { return m_storage.size(); }
     constexpr void clear() noexcept { m_count = 0; }
+
+    constexpr Move* data() noexcept { return m_storage.data(); }
+    constexpr const Move* data() const noexcept { return m_storage.data(); }
+
+    constexpr auto begin() noexcept { return m_storage.begin(); }
+    constexpr auto end() noexcept { return m_storage.begin() + m_count; }
+    constexpr auto begin() const noexcept { return m_storage.cbegin(); }
+    constexpr auto end() const noexcept { return m_storage.cbegin() + m_count; }
+    constexpr auto cbegin() const noexcept { return m_storage.cbegin(); }
+    constexpr auto cend() const noexcept { return m_storage.cbegin() + m_count; }
 
 private:
     std::array<Move, 256> m_storage;

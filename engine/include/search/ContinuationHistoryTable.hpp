@@ -9,6 +9,14 @@ namespace Boson {
 
 class ContinuationHistoryTable {
 public:
+    static constexpr int MAX_HISTORY = 16384;
+    static constexpr int MIN_HISTORY = -16384;
+
+    // Stage 1: Initialize / Clear table at search boundaries
+    void initialize() noexcept {
+        clear();
+    }
+
     void clear() noexcept {
         for (auto& pieceRow : m_table) {
             for (auto& prevSqRow : pieceRow) {
@@ -17,15 +25,9 @@ public:
         }
     }
 
-    // Direct cache-friendly array insertion mapping: [Piece][PrevToSq][CurrentToSq]
-    void updateScore(Piece p, Square prevTo, Square currTo, int bonus) noexcept {
-        if (p != Piece::None && prevTo != Square::None && currTo != Square::None) {
-            int& score = m_table[static_cast<size_t>(p)][static_cast<size_t>(prevTo)][static_cast<size_t>(currTo)];
-            score += bonus;
-            // Bound caps to prevent standard integer overflow before global normalization sweeps
-            if (score > 32000) score = 32000;
-            if (score < -32000) score = -32000;
-        }
+    // Stage 2: Probe contextual score for piece and move history
+    [[nodiscard]] int probe(Piece p, Square prevTo, Square currTo) const noexcept {
+        return getScore(p, prevTo, currTo);
     }
 
     [[nodiscard]] int getScore(Piece p, Square prevTo, Square currTo) const noexcept {
@@ -33,7 +35,21 @@ public:
         return m_table[static_cast<size_t>(p)][static_cast<size_t>(prevTo)][static_cast<size_t>(currTo)];
     }
 
-    // Unified Aging Hook hooked into Search's central normalization sweep
+    // Stage 3: Bounded Update with Stockfish gravity decay clamped at +/- 16384
+    void update(Piece p, Square prevTo, Square currTo, int bonus) noexcept {
+        if (p != Piece::None && prevTo != Square::None && currTo != Square::None) {
+            int& score = m_table[static_cast<size_t>(p)][static_cast<size_t>(prevTo)][static_cast<size_t>(currTo)];
+            int clampedBonus = std::clamp(bonus, MIN_HISTORY, MAX_HISTORY);
+            score += clampedBonus - (score * std::abs(clampedBonus) / MAX_HISTORY);
+            score = std::clamp(score, MIN_HISTORY, MAX_HISTORY);
+        }
+    }
+
+    void updateScore(Piece p, Square prevTo, Square currTo, int bonus) noexcept {
+        update(p, prevTo, currTo, bonus);
+    }
+
+    // Stage 4: Aging / Normalize hook to decay scores across iterations
     void normalize() noexcept {
         for (auto& pieceRow : m_table) {
             for (auto& prevSqRow : pieceRow) {
@@ -42,6 +58,10 @@ public:
                 }
             }
         }
+    }
+
+    void age() noexcept {
+        normalize();
     }
 
 private:

@@ -1,6 +1,7 @@
 #ifndef BOSON_BOARD_PRINTER_HPP
 #define BOSON_BOARD_PRINTER_HPP
 
+#include <iostream>
 #include "board/Position.hpp"
 
 namespace Boson {
@@ -12,7 +13,7 @@ public:
         Debug
     };
 
-    static void print(const Position& pos, Mode mode) noexcept;
+    static void print(const Position& pos, Mode mode, std::ostream& os = std::cout) noexcept;
 };
 
 } // namespace Boson

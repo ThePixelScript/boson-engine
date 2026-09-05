@@ -12,6 +12,7 @@ struct SearchLimits {
     int64_t binc = 0;
     int64_t movetime = -1;
     int depth = -1;
+    int64_t nodes = -1;
     bool infinite = false;
 };
 

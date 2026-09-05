@@ -15,13 +15,21 @@ enum class ParseError : uint8_t {
     InvalidEnPassantSquare,
     InvalidHalfmoveClock,
     InvalidFullmoveNumber,
-    MalformedFieldCount
+    MalformedFieldCount,
+    MissingKing,
+    PawnsOnFirstOrLastRank
 };
 
 class FenParser {
 public:
-    // Parses a standard FEN string. Returns a populated Position or a ParseError.
+    // Performs syntactic parsing of a standard FEN string into a Position.
     static std::expected<Position, ParseError> parse(std::string_view fen) noexcept;
+
+    // Performs semantic validation of game-rule invariants on an instantiated Position.
+    static std::expected<void, ParseError> validateSemantics(const Position& pos) noexcept;
+
+    // Executes syntactic parsing followed by semantic validation.
+    static std::expected<Position, ParseError> parseStrict(std::string_view fen) noexcept;
 
 private:
     static bool parsePiecePlacement(std::string_view field, Position& pos) noexcept;

@@ -3,11 +3,11 @@
 
 namespace Boson {
 
-void BoardPrinter::print(const Position& pos, Mode mode) noexcept {
+void BoardPrinter::print(const Position& pos, Mode mode, std::ostream& os) noexcept {
     if (mode == Mode::Human || mode == Mode::Debug) {
-        std::cout << "\n";
+        os << "\n";
         for (int rank = 7; rank >= 0; --rank) {
-            std::cout << " " << (rank + 1) << " ";
+            os << " " << (rank + 1) << " ";
             for (int file = 0; file < 8; ++file) {
                 Square sq = static_cast<Square>(rank * 8 + file);
                 Bitboard mask = Bitboards::getSquareBit(sq);
@@ -26,33 +26,33 @@ void BoardPrinter::print(const Position& pos, Mode mode) noexcept {
                 else if (pos.getPieceBitboard(Piece::BlackQueen) & mask) symbol = 'q';
                 else if (pos.getPieceBitboard(Piece::BlackKing) & mask) symbol = 'k';
 
-                std::cout << " " << symbol;
+                os << " " << symbol;
             }
-            std::cout << "\n";
+            os << "\n";
         }
-        std::cout << "     a b c d e f g h\n";
+        os << "     a b c d e f g h\n";
     }
 
     if (mode == Mode::Debug) {
-        std::cout << "\n--- State Metadata ---\n";
-        std::cout << "Side To Move : " << (pos.getSideToMove() == Color::White ? "White" : "Black") << "\n";
+        os << "\n--- State Metadata ---\n";
+        os << "Side To Move : " << (pos.getSideToMove() == Color::White ? "White" : "Black") << "\n";
         
         auto rights = pos.getCastlingRights();
-        std::cout << "Castling     : ";
-        if (rights == CastlingRights::None) std::cout << "-";
+        os << "Castling     : ";
+        if (rights == CastlingRights::None) os << "-";
         else {
-            if (static_cast<uint8_t>(rights & CastlingRights::WhiteOO))  std::cout << "K";
-            if (static_cast<uint8_t>(rights & CastlingRights::WhiteOOO)) std::cout << "Q";
-            if (static_cast<uint8_t>(rights & CastlingRights::BlackOO))  std::cout << "k";
-            if (static_cast<uint8_t>(rights & CastlingRights::BlackOOO)) std::cout << "q";
+            if (static_cast<uint8_t>(rights & CastlingRights::WhiteOO))  os << "K";
+            if (static_cast<uint8_t>(rights & CastlingRights::WhiteOOO)) os << "Q";
+            if (static_cast<uint8_t>(rights & CastlingRights::BlackOO))  os << "k";
+            if (static_cast<uint8_t>(rights & CastlingRights::BlackOOO)) os << "q";
         }
-        std::cout << "\n";
+        os << "\n";
 
-        std::cout << "En Passant   : " << (pos.getEnPassantSquare() == Square::None ? "-" : "Active") << "\n";
-        std::cout << "Halfmove     : " << pos.getHalfmoveClock() << "\n";
-        std::cout << "Fullmove     : " << pos.getFullmoveNumber() << "\n";
-        std::cout << "Total Occ.   : " << std::hex << pos.getTotalOccupancy() << std::dec << "\n";
-        std::cout << "----------------------\n\n";
+        os << "En Passant   : " << (pos.getEnPassantSquare() == Square::None ? "-" : "Active") << "\n";
+        os << "Halfmove     : " << pos.getHalfmoveClock() << "\n";
+        os << "Fullmove     : " << pos.getFullmoveNumber() << "\n";
+        os << "Total Occ.   : " << std::hex << pos.getTotalOccupancy() << std::dec << "\n";
+        os << "----------------------\n\n";
     }
 }
 

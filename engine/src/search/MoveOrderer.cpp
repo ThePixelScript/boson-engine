@@ -45,7 +45,16 @@ void MoveOrderer::scoreAndSortMoves(
 ) noexcept {
     std::array<int, 256> scores{};
 
-    Move cmhMove = Search::getCMH().getCounterMove(prevMove.getFromSquare(), prevMove.getToSquare());
+    Move cmhMove;
+    if (prevMove.getRawData() != 0) {
+        cmhMove = Search::getCMH().getCounterMove(prevMove.getFromSquare(), prevMove.getToSquare());
+        if (cmhMove.getRawData() == 0) {
+            Piece prevPiece = findPieceAtSquare(pos, prevMove.getToSquare());
+            if (prevPiece != Piece::None) {
+                cmhMove = Search::getCMH().getCounterMove(prevPiece, prevMove.getToSquare());
+            }
+        }
+    }
     auto& stats = SearchController::getInstance().getStats();
 
     for (size_t i = 0; i < moves.size(); ++i) {
@@ -68,15 +77,11 @@ void MoveOrderer::scoreAndSortMoves(
                 int aIdx = getPieceIndex(attacker);
                 int vIdx = getPieceIndex(victim);
                 
-                int mvvLvaScore = SCORE_CAPTURES + MVV_LVA[vIdx][aIdx];
-                int seeValue = SEE::evaluate(const_cast<Position&>(pos), m.getFromSquare(), m.getToSquare());
-
-                if (aIdx == 0 && vIdx == 0 && seeValue == 0) {
-                    score = SCORE_QUIET + 5000;
-                } else if (seeValue < -400) {
-                    score = SCORE_QUIET - 5000 + seeValue;
+                int seeValue = SEE::evaluate(pos, m.getFromSquare(), m.getToSquare());
+                if (seeValue >= 0) {
+                    score = SCORE_CAPTURES + MVV_LVA[vIdx][aIdx];
                 } else {
-                    score = mvvLvaScore;
+                    score = SCORE_LOSING_CAPTURES + seeValue;
                 }
             }
             else if (m.isPromotion()) {
@@ -89,37 +94,31 @@ void MoveOrderer::scoreAndSortMoves(
                     } else if (m.getRawData() == killerMoves[ply][1].getRawData()) {
                         score = SCORE_KILLER_2;
                     }
-                    else if (cmhMove.getRawData() != 0 && m.getRawData() == cmhMove.getRawData()) {
-                        stats.cmhHits++;
-                        score = SCORE_KILLER_2 - 50;
-                    }
-                    else if (attacker != Piece::None) {
-                        size_t pIdx = static_cast<size_t>(attacker);
-                        size_t toIdx = static_cast<size_t>(m.getToSquare());
-                        
+                    else {
+                        const bool isCmh = (cmhMove.getRawData() != 0 && m.getRawData() == cmhMove.getRawData());
+                        if (isCmh) {
+                            stats.cmhHits++;
+                        }
+
                         int conthistScore = 0;
-                        if (prevMove.getRawData() != 0) {
+                        if (prevMove.getRawData() != 0 && attacker != Piece::None) {
                             conthistScore = Search::getContHist().getScore(attacker, prevMove.getToSquare(), m.getToSquare());
                             if (conthistScore > 0) {
                                 stats.conthistHits++;
                             }
                         }
 
-                        score = SCORE_QUIET + static_cast<int>(historyTable[pIdx][toIdx]) + (conthistScore / 16);
-
-                        if (attacker == Piece::WhitePawn || attacker == Piece::BlackPawn) {
-                            Square toSq = m.getToSquare();
-                            if (toSq == Square::E3 || toSq == Square::E4 || 
-                                toSq == Square::D3 || toSq == Square::D4 || 
-                                toSq == Square::A6 || toSq == Square::A3) {
-                                score += 6000; // Sorts quiet pawn setups above passive major piece shuffles
-                            }
+                        if (conthistScore > 0) {
+                            score = SCORE_CONTHIST_BASE + std::clamp(conthistScore / 8, 0, 3500);
                         }
-
-                        if (attacker == Piece::WhiteKing || attacker == Piece::BlackKing) {
-                            if (!m.isCastling()) {
-                                score -= 3000;
-                            }
+                        else if (isCmh) {
+                            score = SCORE_COUNTERMOVE;
+                        }
+                        else if (attacker != Piece::None) {
+                            size_t pIdx = static_cast<size_t>(attacker);
+                            size_t toIdx = static_cast<size_t>(m.getToSquare());
+                            int hist = static_cast<int>(historyTable[pIdx][toIdx]);
+                            score = SCORE_QUIET + std::clamp(hist + (conthistScore / 16), 0, 20000);
                         }
                     }
                 }
@@ -129,6 +128,50 @@ void MoveOrderer::scoreAndSortMoves(
     }
 
     // Selection sort
+    for (size_t i = 0; i < moves.size(); ++i) {
+        for (size_t j = i + 1; j < moves.size(); ++j) {
+            if (scores[j] > scores[i]) {
+                std::swap(scores[i], scores[j]);
+                std::swap(moves[i], moves[j]);
+            }
+        }
+    }
+}
+
+void MoveOrderer::scoreAndSortTacticalMoves(const Position& pos, MoveList& moves) noexcept {
+    std::array<int, 256> scores{};
+
+    for (size_t i = 0; i < moves.size(); ++i) {
+        const Move& m = moves[i];
+        int score = SCORE_QUIET;
+
+        Piece attacker = findPieceAtSquare(pos, m.getFromSquare());
+        Piece victim = findPieceAtSquare(pos, m.getToSquare());
+
+        if (m.isEnPassant() ||
+            (m.getToSquare() == pos.getEnPassantSquare() && pos.getEnPassantSquare() != Square::None)) {
+            victim = (pos.getSideToMove() == Color::White) ? Piece::BlackPawn : Piece::WhitePawn;
+        }
+
+        if (victim != Piece::None) {
+            int aIdx = getPieceIndex(attacker);
+            int vIdx = getPieceIndex(victim);
+
+            int seeValue = SEE::evaluate(pos, m.getFromSquare(), m.getToSquare());
+            if (seeValue >= 0) {
+                score = SCORE_CAPTURES + MVV_LVA[vIdx][aIdx];
+            } else {
+                score = SCORE_LOSING_CAPTURES + seeValue;
+            }
+        }
+        else if (m.isPromotion()) {
+            score = SCORE_PROMOTIONS + static_cast<int>(m.getPromotionPiece()) * 100;
+        }
+
+        scores[i] = score;
+    }
+
+    // Stack-only selection sort
     for (size_t i = 0; i < moves.size(); ++i) {
         for (size_t j = i + 1; j < moves.size(); ++j) {
             if (scores[j] > scores[i]) {

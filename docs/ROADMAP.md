@@ -1,13 +1,171 @@
-# BOSON Technical Roadmap
+# Engine Development Roadmap
 
-## Milestone 0: Platform Genesis [CURRENT]
-- Setup CMake targets with strict compiler diagnostic requirements.
-- Initialize UCI interface echo loop and state engine skeleton.
+This document outlines the architectural roadmap for the Boson chess engine, tracking progress from platform genesis through advanced research milestones.
 
-## Milestone 1: State Processing & FEN
-- Implement hardware-native Bitboard structures.
-- Construct legal FEN parser and deterministic board output formatter.
+---
+
+## Milestone Summary
+
+| Milestone | Designation | Primary Focus | Status |
+| :---: | :--- | :--- | :---: |
+| **0** | **Platform Genesis & Architecture Charter** | Infrastructure, C++23 standards, directory layout, UCI skeleton | **Complete** |
+| **1** | **State Processing & FEN Parsing** | Bitboards, domain primitives, FEN parser, board visualizer | **Complete** |
+| **2** | **Move Generation & Validation** | Attack tables, legal move filtering, pin detection, Perft harness | **Complete** |
+| **3** | **Search Core & Negamax Engine** | Alpha-Beta Negamax, iterative deepening, PV tracking, time allocation | **Complete** |
+| **4** | **Transposition Table & Hashing** | 64-bit incremental Zobrist hash, TT cluster storage, draw detection | **Complete** |
+| **5** | **Quiescence Search & Move Ordering** | Stand-pat quiescence, MVV-LVA, Killer moves, Global History | **Complete** |
+| **6** | **Advanced Search Heuristics** | SEE, NMP, LMR, Counter-Move History, Continuation History, Correction History | **Complete** |
+| **7** | **Positional Evaluation & Tuning** | Tapered evaluation, pawn structures, king safety, mobility, Texel tuning | Planned |
+| **8** | **Neural Network Evaluation (NNUE)** | HalfKP/HalfKAv2 inference, SIMD vectorization (AVX2/AVX-512), dual evaluator | Planned |
+| **9** | **Parallel Search (Lazy SMP)** | Lockless shared TT, thread pool, scaling telemetry | Planned |
+| **10** | **Endgame Tablebases & Clock Policy** | Syzygy 3-4-5-6 probing (WDL/DTZ), dynamic complexity-based clock management | Planned |
+| **Ω** | **Platform Horizon & Self-Play** | Distributed self-play pipeline, reinforcement learning, automated SPRT cluster | Research |
+
+---
+
+## Milestone 0: Platform Genesis & Architecture Charter
+- **Scope:** Establish project scaffolding, strict compiler diagnostic standards, and architectural blueprints.
+- **Key Deliverables:**
+  - CMake 3.25+ build system enforcing C++23 (`set(CMAKE_CXX_STANDARD 23)`).
+  - Strict compiler diagnostic flags (`/W4 /WX` on MSVC, `-Wall -Wextra -Wpedantic -Werror` on GCC/Clang).
+  - Clean directory layout: `engine/src/`, `engine/include/`, `tests/`, `scripts/`, `tools/`, `docs/`.
+  - Architecture specifications, coding standard, five immutable principles, and platform vision.
+  - Basic UCI handshake loop (`uci`, `isready`, `quit`).
+- **Exit Criteria:** Zero compiler warnings across all targets; working test runner executable.
+- **Status:** Complete.
+
+---
+
+## Milestone 1: State Processing & FEN Parsing
+- **Scope:** Define core board primitives and state representation.
+- **Key Deliverables:**
+  - 64-bit `Bitboard` structures and basic bit-manipulation primitives (`std::popcount`, `std::countr_zero`).
+  - Strongly typed domain entities: `Square`, `Color`, `Piece`, `CastlingRights`.
+  - `Position` class tracking 12 piece bitboards and 3 composite occupancy bitboards.
+  - Six-stage decoupled `FenParser` and dual-mode ASCII/Unicode `BoardPrinter`.
+- **Exit Criteria:** 100% roundtrip accuracy parsing and formatting standard FEN strings.
+- **Status:** Complete.
+
+---
 
 ## Milestone 2: Move Generation & Validation
-- Implement sliding piece attack structures via hardware BMI2 instructions.
-- Create automated Perft framework passing 100% of standard benchmark positions.
+- **Scope:** Implement attack logic, pseudo-legal generation, and strictly legal move validation.
+- **Key Deliverables:**
+  - Precalculated sliding piece ray tables (orthogonal and diagonal).
+  - Precalculated knight and king leaper masks.
+  - Pawn push, capture, promotion, and en-passant mechanics.
+  - Fast square attack queries (`isSquareAttacked`) and check detection (`inCheck`).
+  - Transactional move state transitions (`makeMove` / `undoMove` with `UndoState`).
+  - Recursive Perft validation harness with `divide` diagnostics.
+- **Exit Criteria:** 100% node count match across standard Perft test suites up to depth 6.
+- **Status:** Complete.
+
+---
+
+## Milestone 3: Search Core & Negamax Engine
+- **Scope:** Implement fundamental lookahead tree search and search controller.
+- **Key Deliverables:**
+  - Recursive Alpha-Beta Negamax search framework.
+  - Iterative deepening driver with Principal Variation (PV) tracking and extraction.
+  - `TimeManager` computing soft and hard time budgets based on remaining clock and increment.
+  - `SearchController` with atomic stop flags for non-blocking GUI interruption.
+  - Standard UCI output formatting (`info depth`, `score cp`, `nodes`, `nps`, `time`, `pv`).
+- **Exit Criteria:** Clean iterative deepening search under hard clock constraints with zero memory leaks.
+- **Status:** Complete.
+
+---
+
+## Milestone 4: Transposition Table & Hashing
+- **Scope:** Cache previously evaluated search subtrees to reduce redundant tree traversal.
+- **Key Deliverables:**
+  - 64-bit pseudorandom incremental Zobrist hash generator (pieces, castling, en passant, side).
+  - Hash table with cluster storage and depth-preferred replacement policy.
+  - Bound storage: exact score, lower bound (beta cutoff), upper bound (fail low).
+  - Draw detection: threefold repetition and fifty-move rule checks.
+  - Hand-crafted baseline material and piece-square table (PST) evaluation.
+- **Exit Criteria:** Significant node count reduction on deep searches; zero hash collisions in validation runs.
+- **Status:** Complete.
+
+---
+
+## Milestone 5: Quiescence Search & Move Ordering Foundation
+- **Scope:** Mitigate the horizon effect and establish stage-based move ordering.
+- **Key Deliverables:**
+  - Quiescence search evaluating non-quiet positions (captures, promotions) to tactical stability.
+  - Stand-pat delta pruning within quiescence search.
+  - Move ordering pipeline: Hash move $\rightarrow$ MVV-LVA captures $\rightarrow$ Killer moves (2 slots/ply) $\rightarrow$ Global History heuristic.
+- **Exit Criteria:** Resolution of tactical blunders at search horizon; measurable increase in beta-cutoff rate.
+- **Status:** Complete.
+
+---
+
+## Milestone 6: Advanced Search Heuristics Suite
+- **Scope:** Integrate modern selective search pruning, reductions, and history-based ordering.
+- **Key Deliverables:**
+  - Static Exchange Evaluation (SEE) recursive swap algorithm to classify winning/losing captures.
+  - Null Move Pruning (NMP) with dynamic reduction ($R=2$) and material zugzwang guards.
+  - Late Move Reductions (LMR) using logarithmic reduction tables and null-window scout re-searches.
+  - Counter-Move History (CMH) table indexing refutations against previous moves.
+  - 2-Ply Continuation History matrix tracking move efficacy within piece sequence contexts.
+  - Correction History table dynamically adjusting static evaluation scores based on search results.
+  - Aspiration Windows framework ($\pm 30$ cp) with progressive widening.
+- **Exit Criteria:** Node count reduction of $>50\%$ on standard tactical suites while maintaining or improving solve rates.
+- **Status:** Complete.
+
+---
+
+## Milestone 7: Positional Evaluation & Automated Tuning
+- **Scope:** Expand positional knowledge and automate parameter optimization.
+- **Key Deliverables:**
+  - Tapered evaluation interpolating smoothly between opening, middlegame, and endgame phases.
+  - Pawn structure terms: passed pawns, isolated pawns, doubled pawns, backward pawns, candidate passers.
+  - Positional terms: piece mobility, open/semi-open files, outpost squares, king safety attack zones.
+  - Offline Texel Tuning implementation in `tools/` to optimize evaluation weights against grandmaster game datasets.
+- **Exit Criteria:** Statistically significant Elo gain against baseline in fixed-depth SPRT matches.
+- **Status:** Planned.
+
+---
+
+## Milestone 8: Neural Network Evaluation (NNUE)
+- **Scope:** Integrate an Efficiently Updatable Neural Network inference engine alongside HCE.
+- **Key Deliverables:**
+  - NNUE inference engine supporting standard network architectures (HalfKP / HalfKAv2).
+  - Incremental accumulator maintenance integrated into `MoveExecutor::makeMove` and `undoMove`.
+  - SIMD-vectorized forward pass using AVX2 and AVX-512 integer arithmetic.
+  - Dual-evaluator configuration via UCI option (`Use NNUE = true/false`).
+- **Exit Criteria:** Fast forward-pass inference (>2M NPS with NNUE); measurable Elo leap over HCE.
+- **Status:** Planned.
+
+---
+
+## Milestone 9: Parallel Search (Lazy SMP)
+- **Scope:** Scale search across multi-core CPU architectures.
+- **Key Deliverables:**
+  - Multi-threaded search orchestrator using Lazy SMP architecture.
+  - Lockless Transposition Table updates using atomic 64-bit verification words.
+  - Thread-safe `SearchController` with unified stop coordination.
+  - Thread scaling benchmarks (1, 2, 4, 8, 16 threads).
+- **Exit Criteria:** Linear or near-linear depth scaling across core counts with zero deadlocks or race conditions.
+- **Status:** Planned.
+
+---
+
+## Milestone 10: Endgame Tablebases & Dynamic Clock Policy
+- **Scope:** Tablebase probing and dynamic time management.
+- **Key Deliverables:**
+  - Syzygy 3-4-5-6 piece endgame tablebase probing (WDL and DTZ).
+  - Root probing and in-search probing with distance-to-zero pruning.
+  - Position complexity metrics dynamically modulating time allocation (e.g., extend time when search score is unstable or root move changes frequently).
+- **Exit Criteria:** Immediate 100% accurate play in probed endgame positions; improved time distribution in complex middlegames.
+- **Status:** Planned.
+
+---
+
+## Milestone Ω: Platform Horizon & Research Framework
+- **Scope:** Autonomous self-play, reinforcement learning, and distributed infrastructure.
+- **Key Deliverables:**
+  - High-throughput self-play match runner executing automated SPRT testing clusters.
+  - Reinforcement learning pipeline training evaluation weights from scratch.
+  - Hardware micro-profiling harnesses for hardware-specific optimizations.
+- **Exit Criteria:** Continuous automated self-improvement and statistical testing pipeline.
+- **Status:** Research.

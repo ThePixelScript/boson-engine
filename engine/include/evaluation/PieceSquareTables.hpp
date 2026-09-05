@@ -15,6 +15,7 @@ public:
     static const std::array<int16_t, 64> Rook;
     static const std::array<int16_t, 64> Queen;
     static const std::array<int16_t, 64> KingMiddle;
+    static const std::array<int16_t, 64> KingEndgame;
 };
 
 } // namespace Boson

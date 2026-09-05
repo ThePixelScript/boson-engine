@@ -144,7 +144,7 @@ Square SEE::getLeastValuableAttacker(const Position& pos, Bitboard attackers, Co
     return Square::None;
 }
 
-int SEE::evaluate(Position& pos, Square fromSq, Square toSq) noexcept {
+int SEE::evaluate(const Position& pos, Square fromSq, Square toSq) noexcept {
     std::array<int, 32> gain{};
     int d = 0;
 

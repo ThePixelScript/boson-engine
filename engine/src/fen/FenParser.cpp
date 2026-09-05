@@ -2,18 +2,21 @@
 #include <vector>
 #include <sstream>
 #include <charconv>
+#include <bit>
 
 namespace Boson {
 
 std::string_view to_string(ParseError error) noexcept {
     switch (error) {
-        case ParseError::InvalidPiecePlacement: return "Syntax Error: Invalid Piece Placement Field.";
-        case ParseError::InvalidActiveColor:    return "Syntax Error: Invalid Active Color Field.";
-        case ParseError::InvalidCastlingRights: return "Syntax Error: Invalid Castling Rights Field.";
+        case ParseError::InvalidPiecePlacement:  return "Syntax Error: Invalid Piece Placement Field.";
+        case ParseError::InvalidActiveColor:     return "Syntax Error: Invalid Active Color Field.";
+        case ParseError::InvalidCastlingRights:  return "Syntax Error: Invalid Castling Rights Field.";
         case ParseError::InvalidEnPassantSquare: return "Syntax Error: Invalid En Passant Square Field.";
-        case ParseError::InvalidHalfmoveClock:  return "Syntax Error: Invalid Halfmove Clock Field.";
+        case ParseError::InvalidHalfmoveClock:   return "Syntax Error: Invalid Halfmove Clock Field.";
         case ParseError::InvalidFullmoveNumber:  return "Syntax Error: Invalid Fullmove Number Field.";
-        case ParseError::MalformedFieldCount:   return "Syntax Error: Incorrect Number of FEN Fields.";
+        case ParseError::MalformedFieldCount:    return "Syntax Error: Incorrect Number of FEN Fields.";
+        case ParseError::MissingKing:            return "Semantic Error: Exactly one king required per side.";
+        case ParseError::PawnsOnFirstOrLastRank: return "Semantic Error: Pawns cannot reside on rank 1 or rank 8.";
     }
     return "Unknown Parser Error.";
 }
@@ -33,7 +36,7 @@ std::expected<Position, ParseError> FenParser::parse(std::string_view fen) noexc
     }
     fields.push_back(fen.substr(start));
 
-    // ✅ Accept EPD (4 fields) or full FEN (5-6 fields)
+    // Accept EPD (4 fields) or full FEN (5-6 fields)
     if (fields.size() < 4 || fields.size() > 6) {
         return std::unexpected(ParseError::MalformedFieldCount);
     }
@@ -55,6 +58,36 @@ std::expected<Position, ParseError> FenParser::parse(std::string_view fen) noexc
 
     pos.updateOccupancy();
     return pos;
+}
+
+std::expected<void, ParseError> FenParser::validateSemantics(const Position& pos) noexcept {
+    // Exactly one white king and one black king
+    if (std::popcount(pos.getPieceBitboard(Piece::WhiteKing)) != 1 ||
+        std::popcount(pos.getPieceBitboard(Piece::BlackKing)) != 1) {
+        return std::unexpected(ParseError::MissingKing);
+    }
+
+    // No pawns on rank 1 or rank 8
+    constexpr Bitboard RANK_1 = 0x00000000000000FFULL;
+    constexpr Bitboard RANK_8 = 0xFF00000000000000ULL;
+    Bitboard allPawns = pos.getPieceBitboard(Piece::WhitePawn) | pos.getPieceBitboard(Piece::BlackPawn);
+    if ((allPawns & (RANK_1 | RANK_8)) != 0ULL) {
+        return std::unexpected(ParseError::PawnsOnFirstOrLastRank);
+    }
+
+    return {};
+}
+
+std::expected<Position, ParseError> FenParser::parseStrict(std::string_view fen) noexcept {
+    auto parsed = parse(fen);
+    if (!parsed.has_value()) {
+        return parsed;
+    }
+    auto validation = validateSemantics(parsed.value());
+    if (!validation.has_value()) {
+        return std::unexpected(validation.error());
+    }
+    return parsed;
 }
 
 bool FenParser::parsePiecePlacement(std::string_view field, Position& pos) noexcept {

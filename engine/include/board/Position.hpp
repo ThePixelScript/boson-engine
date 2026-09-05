@@ -22,6 +22,8 @@ struct BoardSnapshot {
     Square blackKingSquare{Square::None};
 };
 
+struct UndoState;
+
 class Position {
 public:
     Position() noexcept;
@@ -44,13 +46,40 @@ public:
     void setCastlingRights(CastlingRights rights) noexcept;
     void setHalfmoveClock(uint16_t clock) noexcept { m_halfmoveClock = clock; }
     void setFullmoveNumber(uint16_t number) noexcept { m_fullmoveNumber = number; }
+
+    [[nodiscard]] bool hasNonPawnMaterial(Color side) const noexcept {
+        const Bitboard n = (side == Color::White) ? m_pieces[static_cast<size_t>(Piece::WhiteKnight)]
+                                                  : m_pieces[static_cast<size_t>(Piece::BlackKnight)];
+        const Bitboard b = (side == Color::White) ? m_pieces[static_cast<size_t>(Piece::WhiteBishop)]
+                                                  : m_pieces[static_cast<size_t>(Piece::BlackBishop)];
+        const Bitboard r = (side == Color::White) ? m_pieces[static_cast<size_t>(Piece::WhiteRook)]
+                                                  : m_pieces[static_cast<size_t>(Piece::BlackRook)];
+        const Bitboard q = (side == Color::White) ? m_pieces[static_cast<size_t>(Piece::WhiteQueen)]
+                                                  : m_pieces[static_cast<size_t>(Piece::BlackQueen)];
+        return (n | b | r | q) != 0ULL;
+    }
+
+    void makeNullMove(UndoState& undoState) noexcept;
+    void undoNullMove(const UndoState& undoState) noexcept;
         
     void clearState() noexcept;
     void updateOccupancy() noexcept;
     void syncKingSquaresFromBitboards() noexcept;
     BoardSnapshot captureSnapshot() const noexcept;
     bool matchesSnapshot(const BoardSnapshot& snapshot) const noexcept;
-    void debugPrintToConsole() const noexcept;
+
+    bool operator==(const Position& rhs) const noexcept {
+        return m_pieces == rhs.m_pieces
+            && m_occupancy == rhs.m_occupancy
+            && m_sideToMove == rhs.m_sideToMove
+            && m_enPassantSquare == rhs.m_enPassantSquare
+            && m_castlingRights == rhs.m_castlingRights
+            && m_halfmoveClock == rhs.m_halfmoveClock
+            && m_fullmoveNumber == rhs.m_fullmoveNumber
+            && m_whiteKingSquare == rhs.m_whiteKingSquare
+            && m_blackKingSquare == rhs.m_blackKingSquare
+            && m_hashKey == rhs.m_hashKey;
+    }
 
     uint64_t getHashKey() const noexcept { return m_hashKey; }
 

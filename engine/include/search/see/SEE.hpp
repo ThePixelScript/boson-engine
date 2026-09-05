@@ -9,8 +9,10 @@ namespace Boson {
 
 class SEE {
 public:
-    // Accept raw source and destination coordinates to bypass object packing layers
-    static int evaluate(Position& pos, Square fromSq, Square toSq) noexcept;
+    static int evaluate(const Position& pos, Square fromSq, Square toSq) noexcept;
+    static int evaluate(const Position& pos, Move move) noexcept {
+        return evaluate(pos, move.getFromSquare(), move.getToSquare());
+    }
 
 private:
     static int getPieceValue(Piece p) noexcept;

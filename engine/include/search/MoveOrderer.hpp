@@ -9,12 +9,15 @@ namespace Boson {
 
 class MoveOrderer {
 public:
-    static constexpr int SCORE_TT          = 100000;
-    static constexpr int SCORE_CAPTURES    = 50000;
-    static constexpr int SCORE_PROMOTIONS  = 40000;
-    static constexpr int SCORE_KILLER_1    = 30000;
-    static constexpr int SCORE_KILLER_2    = 29000;
-    static constexpr int SCORE_QUIET       = 0;
+    static constexpr int SCORE_TT              = 100000;
+    static constexpr int SCORE_CAPTURES        = 50000;
+    static constexpr int SCORE_PROMOTIONS      = 40000;
+    static constexpr int SCORE_KILLER_1        = 32000;
+    static constexpr int SCORE_KILLER_2        = 30000;
+    static constexpr int SCORE_CONTHIST_BASE   = 26000;
+    static constexpr int SCORE_COUNTERMOVE     = 24000;
+    static constexpr int SCORE_QUIET           = 0;
+    static constexpr int SCORE_LOSING_CAPTURES = -20000;
 
     // Rows = victim piece type, columns = attacker piece type.
     static const std::array<std::array<int, 6>, 6> MVV_LVA;
@@ -28,6 +31,8 @@ public:
         int ply,
         Move prevMove // Consumed context parameter
     ) noexcept;
+
+    static void scoreAndSortTacticalMoves(const Position& pos, MoveList& moves) noexcept;
 
 private:
     static int getPieceIndex(Piece p) noexcept;

@@ -1,6 +1,8 @@
 #include "board/Position.hpp"
+#include "board/UndoState.hpp"
 #include "search/Zobrist.hpp"
 #include <iostream>
+#include <cassert>
 #include <intrin.h>
 
 namespace Boson {
@@ -21,6 +23,7 @@ Position::Position() noexcept {
 }
 
 void Position::clearState() noexcept {
+    Zobrist::initialize();
     m_pieces.fill(Bitboards::Empty);
     m_occupancy.fill(Bitboards::Empty);
     m_sideToMove = Color::White;
@@ -115,34 +118,6 @@ bool Position::matchesSnapshot(const BoardSnapshot& snapshot) const noexcept {
         && m_blackKingSquare == snapshot.blackKingSquare;
 }
 
-void Position::debugPrintToConsole() const noexcept {
-    std::cout << "\n +---+---+---+---+---+---+---+──+\n";
-    for (int rank = 7; rank >= 0; --rank) {
-        std::cout << " " << (rank + 1) << " |";
-        for (int file = 0; file < 8; ++file) {
-            Square currentSq = static_cast<Square>(rank * 8 + file);
-            Bitboard currentMask = Bitboards::getSquareBit(currentSq);
-            char activePieceSymbol = '.';
-            if (m_pieces[static_cast<size_t>(Piece::WhitePawn)] & currentMask) activePieceSymbol = 'P';
-            else if (m_pieces[static_cast<size_t>(Piece::WhiteKnight)] & currentMask) activePieceSymbol = 'N';
-            else if (m_pieces[static_cast<size_t>(Piece::WhiteBishop)] & currentMask) activePieceSymbol = 'B';
-            else if (m_pieces[static_cast<size_t>(Piece::WhiteRook)] & currentMask) activePieceSymbol = 'R';
-            else if (m_pieces[static_cast<size_t>(Piece::WhiteQueen)] & currentMask) activePieceSymbol = 'Q';
-            else if (m_pieces[static_cast<size_t>(Piece::WhiteKing)] & currentMask) activePieceSymbol = 'K';
-            else if (m_pieces[static_cast<size_t>(Piece::BlackPawn)] & currentMask) activePieceSymbol = 'p';
-            else if (m_pieces[static_cast<size_t>(Piece::BlackKnight)] & currentMask) activePieceSymbol = 'n';
-            else if (m_pieces[static_cast<size_t>(Piece::BlackBishop)] & currentMask) activePieceSymbol = 'b';
-            else if (m_pieces[static_cast<size_t>(Piece::BlackRook)] & currentMask) activePieceSymbol = 'r';
-            else if (m_pieces[static_cast<size_t>(Piece::BlackQueen)] & currentMask) activePieceSymbol = 'q';
-            else if (m_pieces[static_cast<size_t>(Piece::BlackKing)] & currentMask) activePieceSymbol = 'k';
-            std::cout << " " << activePieceSymbol << " |";
-        }
-        std::cout << "\n +---+---+---+---+---+---+---+──+\n";
-    }
-    std::cout << "    a   b   c   d   e   f   g   h\n\n";
-    std::cout << "Side to move: " << (m_sideToMove == Color::White ? "White" : "Black") << "\n";
-}
-
 void Position::setKingSquare(Color color, Square sq) noexcept {
     if (color == Color::White) m_whiteKingSquare = sq;
     else m_blackKingSquare = sq;
@@ -162,6 +137,41 @@ void Position::setCastlingRights(CastlingRights rights) noexcept {
     m_hashKey ^= Zobrist::s_castling[static_cast<size_t>(m_castlingRights)];
     m_castlingRights = rights;
     m_hashKey ^= Zobrist::s_castling[static_cast<size_t>(m_castlingRights)];
+}
+
+void Position::makeNullMove(UndoState& undoState) noexcept {
+    undoState.castlingRights = m_castlingRights;
+    undoState.enPassantSquare = m_enPassantSquare;
+    undoState.halfmoveClock = m_halfmoveClock;
+    undoState.capturedPiece = Piece::None;
+    undoState.movingPiece = Piece::None;
+    undoState.hashKey = m_hashKey;
+
+    // Clear en passant square (and XOR out its hash key if set)
+    setEnPassantSquare(Square::None);
+
+    // Switch side to move and toggle side hash
+    m_sideToMove = (m_sideToMove == Color::White) ? Color::Black : Color::White;
+    toggleSideHash();
+
+    m_halfmoveClock++;
+    if (m_sideToMove == Color::White) {
+        m_fullmoveNumber++;
+    }
+}
+
+void Position::undoNullMove(const UndoState& undoState) noexcept {
+    if (m_sideToMove == Color::White) {
+        m_fullmoveNumber--;
+    }
+
+    m_sideToMove = (m_sideToMove == Color::White) ? Color::Black : Color::White;
+    toggleSideHash();
+
+    setEnPassantSquare(undoState.enPassantSquare);
+    m_halfmoveClock = static_cast<uint16_t>(undoState.halfmoveClock);
+
+    assert(m_hashKey == undoState.hashKey && "Hash key desynchronized after undoNullMove");
 }
 
 } // namespace Boson

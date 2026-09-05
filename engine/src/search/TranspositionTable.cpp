@@ -42,7 +42,7 @@ void TranspositionTable::store(uint64_t key, int score, Move bestMove, int depth
     }
 }
 
-bool TranspositionTable::probe(uint64_t key, int& score, Move& bestMove, int& depth, TTNodeType& type, int alpha, int beta) noexcept {
+bool TranspositionTable::probeEntry(uint64_t key, int& score, Move& bestMove, int& depth, TTNodeType& type) noexcept {
     m_probes++;
     if (m_capacity == 0) return false;
 
@@ -55,21 +55,30 @@ bool TranspositionTable::probe(uint64_t key, int& score, Move& bestMove, int& de
         depth = entry.depth;
         type = entry.type;
         score = entry.score;
-
-        if (entry.type == TTNodeType::Exact) {
-            m_cutoffs++;
-            return true;
-        }
-        if (entry.type == TTNodeType::LowerBound && score >= beta) {
-            m_cutoffs++;
-            return true;
-        }
-        if (entry.type == TTNodeType::UpperBound && score <= alpha) {
-            m_cutoffs++;
-            return true;
-        }
+        return true;
     } else if (entry.key != 0) {
         m_collisions++;
+    }
+
+    return false;
+}
+
+bool TranspositionTable::probe(uint64_t key, int& score, Move& bestMove, int& depth, TTNodeType& type, int alpha, int beta) noexcept {
+    if (!probeEntry(key, score, bestMove, depth, type)) {
+        return false;
+    }
+
+    if (type == TTNodeType::Exact) {
+        m_cutoffs++;
+        return true;
+    }
+    if (type == TTNodeType::LowerBound && score >= beta) {
+        m_cutoffs++;
+        return true;
+    }
+    if (type == TTNodeType::UpperBound && score <= alpha) {
+        m_cutoffs++;
+        return true;
     }
 
     return false;

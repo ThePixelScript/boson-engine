@@ -14,6 +14,12 @@ public:
     
     // Inverts a move, restoring the Position to its exact prior state
     static void undoMove(Position& pos, const Move& move, const UndoState& undoState) noexcept;
+
+    // Executes a transactional null-move (passes turn) and records tracking information into undoState
+    static void makeNullMove(Position& pos, UndoState& undoState) noexcept;
+
+    // Inverts a null-move, restoring side to move, en-passant square, and Zobrist key
+    static void undoNullMove(Position& pos, const UndoState& undoState) noexcept;
 };
 
 } // namespace Boson

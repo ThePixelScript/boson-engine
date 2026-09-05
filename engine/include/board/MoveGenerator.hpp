@@ -30,8 +30,8 @@ public:
     static bool inCheck(const Position& pos, Color side) noexcept;
 
     // Core movement generation loops
-    static void generateLegalMoves(Position& pos, MoveList& legalMoves) noexcept;
-    static void generateTacticalMoves(Position& pos, MoveList& moves) noexcept;
+    static void generateLegalMoves(const Position& pos, MoveList& legalMoves) noexcept;
+    static void generateTacticalMoves(const Position& pos, MoveList& moves) noexcept;
 
     static void generateKnightMoves(const Position& pos, MoveList& moves) noexcept;
     static void generateKingMoves(const Position& pos, MoveList& moves) noexcept;

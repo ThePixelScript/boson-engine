@@ -48,7 +48,7 @@
 * **Reduction Constant ($R$):** 2
 * **Verification Target:** FEN: Startpos, Depth 6
 
-### 🚀 Engine Optimization Progression History
+### Engine Optimization Progression History
 
 | Milestone Phase | Score | Total Nodes | Time (ms) | NPS | Principal Variation (PV) |
 | :--- | :---: | :---: | :---: | :---: | :--- |
@@ -67,7 +67,7 @@
 * **Formula:** Logarithmic Table Policy ($s\_reductionTable[64][64]$)
 * **Target Test FEN:** Startpos, Depth 6
 
-### 🚀 Engine Optimization Progression History
+### Engine Optimization Progression History
 
 | Milestone Phase | Score | Total Nodes | Time (ms) | NPS | Principal Variation (PV) |
 | :--- | :---: | :---: | :---: | :---: | :--- |
@@ -86,7 +86,7 @@
 * **Memory Footprint:** 196 KB flat matrix array
 * **Target Test FEN:** Startpos, Depth 6
 
-### 🚀 Engine Optimization Progression History
+### Engine Optimization Progression History
 
 | Milestone Phase | Score | Total Nodes | Time (ms) | NPS | Principal Variation (PV) |
 | :--- | :---: | :---: | :---: | :---: | :--- |
@@ -108,7 +108,7 @@
 * **Memory Layout:** 128 KB flat array matrix (14-bit Hash resolution mask)
 * **Target Test FEN:** Startpos, Depth 6
 
-### 🚀 Engine Optimization Progression History
+### Engine Optimization Progression History
 
 | Milestone Phase | Score | Total Nodes | Time (ms) | NPS | Principal Variation (PV) |
 | :--- | :---: | :---: | :---: | :---: | :--- |

@@ -111,11 +111,13 @@ Bitboard MoveGenerator::calculateSlidingAttacks(Square sq, Bitboard occupancy, [
 }
 
 Bitboard MoveGenerator::getRookAttacks(Square sq, Bitboard occupancy) noexcept {
+    initializeTables();
     static constexpr std::array<int, 4> dummyShifts = {0, 0, 0, 0};
     return calculateSlidingAttacks(sq, occupancy, s_rookRays[static_cast<size_t>(sq)], dummyShifts, true);
 }
 
 Bitboard MoveGenerator::getBishopAttacks(Square sq, Bitboard occupancy) noexcept {
+    initializeTables();
     static constexpr std::array<int, 4> dummyShifts = {0, 0, 0, 0};
     return calculateSlidingAttacks(sq, occupancy, s_bishopRays[static_cast<size_t>(sq)], dummyShifts, false);
 }
@@ -125,6 +127,7 @@ Bitboard MoveGenerator::getQueenAttacks(Square sq, Bitboard occupancy) noexcept 
 }
 
 void MoveGenerator::generateSlidingMoves(const Position& pos, MoveList& moves) noexcept {
+    initializeTables();
     const Color us = pos.getSideToMove();
     const Bitboard friendlyOccupancy = pos.getColorOccupancy(us);
     const Bitboard totalOccupancy = pos.getTotalOccupancy();
@@ -167,6 +170,7 @@ void MoveGenerator::generateSlidingMoves(const Position& pos, MoveList& moves) n
 }
 
 void MoveGenerator::generateKingMoves(const Position& pos, MoveList& moves) noexcept {
+    initializeTables();
     const Color us = pos.getSideToMove();
     const Bitboard friendlyOccupancy = pos.getColorOccupancy(us);
     const Bitboard totalOccupancy = pos.getTotalOccupancy();
@@ -206,21 +210,12 @@ void MoveGenerator::generateKingMoves(const Position& pos, MoveList& moves) noex
         } else {
             if (static_cast<bool>(rights & CastlingRights::BlackOO)) {
                 if (!(totalOccupancy & (Bitboards::getSquareBit(Square::F8) | Bitboards::getSquareBit(Square::G8)))) {
-                    if (!isSquareAttacked(pos, Square::E8, Color::White) && 
-                        !isSquareAttacked(pos, Square::F8, Color::White) && 
-                        !isSquareAttacked(pos, Square::G8, Color::White)) {
-                        moves.push_back(Move(Square::E8, Square::G8, Move::Flags::Castling));
-                    }
+                    moves.push_back(Move(Square::E8, Square::G8, Move::Flags::Castling));
                 }
             }
             if (static_cast<bool>(rights & CastlingRights::BlackOOO)) {
                 if (!(totalOccupancy & (Bitboards::getSquareBit(Square::D8) | Bitboards::getSquareBit(Square::C8) | Bitboards::getSquareBit(Square::B8)))) {
-                    // Correct check for Queenside: E8, D8, C8
-                    if (!isSquareAttacked(pos, Square::E8, Color::White) && 
-                        !isSquareAttacked(pos, Square::D8, Color::White) && 
-                        !isSquareAttacked(pos, Square::C8, Color::White)) {
-                        moves.push_back(Move(Square::E8, Square::C8, Move::Flags::Castling));
-                    }
+                    moves.push_back(Move(Square::E8, Square::C8, Move::Flags::Castling));
                 }
             }
         }
@@ -228,6 +223,7 @@ void MoveGenerator::generateKingMoves(const Position& pos, MoveList& moves) noex
 }
 
 void MoveGenerator::generateKnightMoves(const Position& pos, MoveList& moves) noexcept {
+    initializeTables();
     const Color us = pos.getSideToMove();
     const Bitboard friendlyOccupancy = pos.getColorOccupancy(us);
     Bitboard knights = pos.getPieceBitboard((us == Color::White) ? Piece::WhiteKnight : Piece::BlackKnight);
@@ -368,7 +364,7 @@ bool MoveGenerator::inCheck(const Position& pos, Color side) noexcept {
     return isSquareAttacked(pos, kingSq, side == Color::White ? Color::Black : Color::White);
 }
 
-void MoveGenerator::generateLegalMoves(Position& pos, MoveList& legalMoves) noexcept {
+void MoveGenerator::generateLegalMoves(const Position& pos, MoveList& legalMoves) noexcept {
     initializeTables();
     
     const Color us = pos.getSideToMove();
@@ -380,41 +376,42 @@ void MoveGenerator::generateLegalMoves(Position& pos, MoveList& legalMoves) noex
     generatePawnMoves(pos, pseudoMoves);
     generateSlidingMoves(pos, pseudoMoves);
 
-    // Use standard indexing instead of range-based for to avoid missing iterators
-    for (int i = 0; i < pseudoMoves.size(); ++i) {
+    Position tempPos = pos;
+
+    for (size_t i = 0; i < pseudoMoves.size(); ++i) {
         const Move& move = pseudoMoves[i];
         UndoState undo;
 
         if (move.isCastling()) {
-            if (inCheck(pos, us)) continue;
+            if (inCheck(tempPos, us)) continue;
 
             Square to = move.getToSquare();
-            if (to == Square::G1 && (isSquareAttacked(pos, Square::E1, them) || 
-                                    isSquareAttacked(pos, Square::F1, them) || 
-                                    isSquareAttacked(pos, Square::G1, them))) continue;
+            if (to == Square::G1 && (isSquareAttacked(tempPos, Square::E1, them) || 
+                                    isSquareAttacked(tempPos, Square::F1, them) || 
+                                    isSquareAttacked(tempPos, Square::G1, them))) continue;
             
-            if (to == Square::C1 && (isSquareAttacked(pos, Square::E1, them) || 
-                                    isSquareAttacked(pos, Square::D1, them) || 
-                                    isSquareAttacked(pos, Square::C1, them))) continue;
+            if (to == Square::C1 && (isSquareAttacked(tempPos, Square::E1, them) || 
+                                    isSquareAttacked(tempPos, Square::D1, them) || 
+                                    isSquareAttacked(tempPos, Square::C1, them))) continue;
                                     
-            if (to == Square::G8 && (isSquareAttacked(pos, Square::E8, them) || 
-                                    isSquareAttacked(pos, Square::F8, them) || 
-                                    isSquareAttacked(pos, Square::G8, them))) continue;
+            if (to == Square::G8 && (isSquareAttacked(tempPos, Square::E8, them) || 
+                                    isSquareAttacked(tempPos, Square::F8, them) || 
+                                    isSquareAttacked(tempPos, Square::G8, them))) continue;
                                     
-            if (to == Square::C8 && (isSquareAttacked(pos, Square::E8, them) || 
-                                    isSquareAttacked(pos, Square::D8, them) || 
-                                    isSquareAttacked(pos, Square::C8, them))) continue;
+            if (to == Square::C8 && (isSquareAttacked(tempPos, Square::E8, them) || 
+                                    isSquareAttacked(tempPos, Square::D8, them) || 
+                                    isSquareAttacked(tempPos, Square::C8, them))) continue;
         }
 
-        MoveExecutor::makeMove(pos, move, undo);
-        if (!inCheck(pos, us)) {
+        MoveExecutor::makeMove(tempPos, move, undo);
+        if (!inCheck(tempPos, us)) {
             legalMoves.push_back(move);
         }
-        MoveExecutor::undoMove(pos, move, undo);
+        MoveExecutor::undoMove(tempPos, move, undo);
     }
 }
 
-void MoveGenerator::generateTacticalMoves(Position& pos, MoveList& moves) noexcept {
+void MoveGenerator::generateTacticalMoves(const Position& pos, MoveList& moves) noexcept {
     MoveList allMoves;
     generateLegalMoves(pos, allMoves);
 
@@ -424,8 +421,9 @@ void MoveGenerator::generateTacticalMoves(Position& pos, MoveList& moves) noexce
         Bitboard targetBit = 1ULL << static_cast<size_t>(m.getToSquare());
         bool isNormalCapture = (pos.getTotalOccupancy() & targetBit) != 0;
         bool isEnPassantCapture = (m.getToSquare() == pos.getEnPassantSquare() && pos.getEnPassantSquare() != Square::None);
+        bool isPromotion = m.isPromotion();
 
-        if (isNormalCapture || isEnPassantCapture) {
+        if (isNormalCapture || isEnPassantCapture || isPromotion) {
             moves.push_back(m);
         }
     }

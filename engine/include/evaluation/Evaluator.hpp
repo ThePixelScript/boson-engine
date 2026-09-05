@@ -15,8 +15,11 @@ public:
     static constexpr int QUEEN_VALUE = 900;
 
     [[nodiscard]] static int evaluate(const Position& pos) noexcept;
+    [[nodiscard]] static int evaluateWithCorrection(const Position& pos) noexcept { return evaluate(pos); }
     
     [[nodiscard]] static CorrectionHistoryTable& getCorrHist() noexcept { return s_corrTable; }
+    [[nodiscard]] static const CorrectionHistoryTable& getConstCorrHist() noexcept { return s_corrTable; }
+    [[nodiscard]] static CorrectionHistoryTable& getMutableCorrHist() noexcept { return s_corrTable; }
 
 private:
     static inline CorrectionHistoryTable s_corrTable{};
