@@ -22,6 +22,8 @@
 #include "search/LMR.hpp"
 #include "evaluation/Evaluator.hpp"
 #include "evaluation/PieceSquareTables.hpp"
+#include "config/EngineParameters.hpp"
+#include "system/EngineInfo.hpp"
 
 namespace Boson {
 
@@ -1074,10 +1076,11 @@ bool runMilestone2PhasesBCTests() {
 }
 
 // ---------------------------------------------------------------------------
-// Milestone 2: Move Generation & Perft Verification Suite
+// Milestone 2 & Omega: Categorized Move Generation & Perft Verification Suite
 // ---------------------------------------------------------------------------
 
-struct PerftTestCase {
+struct CategorizedPerftTestCase {
+    std::string category;
     std::string name;
     std::string fen;
     std::vector<std::pair<int, uint64_t>> depthExpected;
@@ -1085,11 +1088,13 @@ struct PerftTestCase {
 
 bool runMilestone2PerftTests() {
     std::cout << "\n=================================================================\n";
-    std::cout << "===   MILESTONE 2: MOVE GENERATION & PERFT VERIFICATION TESTS   ===\n";
+    std::cout << "===   CATEGORIZED MOVE GENERATION & PERFT VERIFICATION SUITE  ===\n";
     std::cout << "=================================================================\n";
 
-    const std::vector<PerftTestCase> perftSuite = {
+    const std::vector<CategorizedPerftTestCase> perftSuite = {
+        // Category A: Standard Positions
         {
+            "Category A: Standard Positions",
             "Position 1 (Startpos)",
             "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
             {
@@ -1101,6 +1106,7 @@ bool runMilestone2PerftTests() {
             }
         },
         {
+            "Category A: Standard Positions",
             "Position 2 (KiwiPete)",
             "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
             {
@@ -1110,8 +1116,11 @@ bool runMilestone2PerftTests() {
                 {4, 4085603ULL}
             }
         },
+
+        // Category B: Castling & Path Obstructions
         {
-            "Position 3",
+            "Category B: Castling & Path Obstructions",
+            "CPW Position 3 (Blocked Rooks & King Mobility)",
             "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1",
             {
                 {1, 14ULL},
@@ -1121,7 +1130,42 @@ bool runMilestone2PerftTests() {
             }
         },
         {
-            "Position 4",
+            "Category B: Castling & Path Obstructions",
+            "Empty Board Quad-Castling & Corner Flights",
+            "r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1",
+            {
+                {1, 26ULL},
+                {2, 568ULL},
+                {3, 13744ULL}
+            }
+        },
+
+        // Category C: En Passant Discovered Checks and Pin Evasions
+        {
+            "Category C: En Passant Discovered Checks & Pin Evasions",
+            "Diagonal Pin Preventing En Passant Capture",
+            "8/5bk1/8/2Pp4/8/1K6/8/8 w - d6 0 1",
+            {
+                {1, 8ULL},
+                {2, 104ULL},
+                {3, 736ULL}
+            }
+        },
+        {
+            "Category C: En Passant Discovered Checks & Pin Evasions",
+            "Horizontal Rank Pin Preventing En Passant Capture",
+            "8/8/8/8/k1pP3R/8/8/1K6 b - d3 0 1",
+            {
+                {1, 6ULL},
+                {2, 90ULL},
+                {3, 502ULL}
+            }
+        },
+
+        // Category D: Promotions and Knight/Bishop Underpromotions
+        {
+            "Category D: Promotions & Underpromotions",
+            "CPW Position 4 (Dual Promotion Battery & Discovered Checks)",
             "r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1",
             {
                 {1, 6ULL},
@@ -1129,14 +1173,50 @@ bool runMilestone2PerftTests() {
                 {3, 9467ULL},
                 {4, 422333ULL}
             }
+        },
+        {
+            "Category D: Promotions & Underpromotions",
+            "CPW Position 5 (Underpromotions on d8/c8 with Evasions)",
+            "rnbq1k1r/pp1Pbppp/2p5/8/2B5/8/PPP1NnPP/RNBQK2R w KQ - 1 8",
+            {
+                {1, 44ULL},
+                {2, 1486ULL},
+                {3, 62379ULL}
+            }
+        },
+
+        // Category E: Double Checks and Check Evasion Bottlenecks
+        {
+            "Category E: Double Checks & Check Evasion Bottlenecks",
+            "Double Check Cross-Ray Bottleneck (Bishop b4 + Rook h1)",
+            "4k3/8/8/8/1b6/8/8/4K2r w - - 0 1",
+            {
+                {1, 2ULL},
+                {2, 56ULL},
+                {3, 265ULL}
+            }
+        },
+        {
+            "Category E: Double Checks & Check Evasion Bottlenecks",
+            "CPW Position 5 Full Evasion Branching (Depth 4)",
+            "rnbq1k1r/pp1Pbppp/2p5/8/2B5/8/PPP1NnPP/RNBQK2R w KQ - 1 8",
+            {
+                {4, 2103487ULL}
+            }
         }
     };
 
     int totalRuns = 0;
     int passedRuns = 0;
+    std::string currentCategory = "";
 
     for (const auto& test : perftSuite) {
-        std::cout << "\n--- Perft Verification: " << test.name << " ---\n";
+        if (test.category != currentCategory) {
+            currentCategory = test.category;
+            std::cout << "\n>>> " << currentCategory << " <<<\n";
+        }
+
+        std::cout << "--- " << test.name << " ---\n";
         std::cout << "    FEN: " << test.fen << "\n";
 
         auto parsed = FenParser::parse(test.fen);
@@ -1162,7 +1242,7 @@ bool runMilestone2PerftTests() {
     }
 
     std::cout << "\n=================================================================\n";
-    std::cout << "MILESTONE 2 PERFT RESULT: " << passedRuns << "/" << totalRuns << " Perft Depths Passed.\n";
+    std::cout << "CATEGORIZED PERFT RESULT: " << passedRuns << "/" << totalRuns << " Perft Depths Passed.\n";
     std::cout << "=================================================================\n";
 
     return (passedRuns == totalRuns);
@@ -3400,6 +3480,132 @@ const std::vector<WacTestCase> g_wacSuite = {
     }
 };
 
+// ---------------------------------------------------------------------------
+// Milestone Omega, Phase 1: Engine Identity, Hierarchical Parameters,
+// Categorized Perft, and 4-Section Telemetry
+// ---------------------------------------------------------------------------
+
+bool testEngineIdentitySubsystem() {
+    if (EngineInfo::getName() != "Boson") return false;
+    if (EngineInfo::getVersion() != "0.8.0-dev") return false;
+    if (EngineInfo::getAuthor() != "ThePixelScript") return false;
+    if (EngineInfo::getBuildType().empty()) return false;
+    if (EngineInfo::getCompiler().empty()) return false;
+    if (EngineInfo::getTargetArch().empty()) return false;
+    if (EngineInfo::getInstructionSets().empty()) return false;
+
+    EngineParameters params;
+    std::string snapshot = EngineInfo::serializeConfigSnapshot(params);
+    if (snapshot.find("=== Boson Configuration Snapshot ===") == std::string::npos) return false;
+    if (snapshot.find("[Search Parameters]") == std::string::npos) return false;
+    if (snapshot.find("[Evaluation Parameters]") == std::string::npos) return false;
+    if (snapshot.find("[Time Parameters]") == std::string::npos) return false;
+    if (snapshot.find("[Debug Parameters]") == std::string::npos) return false;
+    if (snapshot.find("lmrBase: 0.5") == std::string::npos) return false;
+    if (snapshot.find("pawnValue: 100") == std::string::npos) return false;
+
+    return true;
+}
+
+bool testHierarchicalParameterArchitecture() {
+    auto& controller = SearchController::getInstance();
+    const EngineParameters orig = controller.getParams();
+
+    // Verify defaults
+    if (orig.search.lmrBase != 0.5) return false;
+    if (orig.search.lmrDivisor != 1.95) return false;
+    if (orig.search.lmrMinDepth != 3) return false;
+    if (orig.search.lmrMinMoveCount != 4) return false;
+    if (orig.search.nmpMinDepth != 3) return false;
+    if (orig.search.nmpReduction != 2) return false;
+    if (orig.search.aspirationInitialDelta != 30) return false;
+    if (orig.search.aspirationMaxDelta != 400) return false;
+    if (orig.search.killerSlotCount != 2) return false;
+
+    if (orig.eval.pawnValue != 100) return false;
+    if (orig.eval.knightValue != 320) return false;
+    if (orig.eval.bishopValue != 330) return false;
+    if (orig.eval.rookValue != 500) return false;
+    if (orig.eval.queenValue != 900) return false;
+    if (orig.eval.maxCorrection != 1024) return false;
+    if (orig.eval.corrScaleFactor != 256) return false;
+
+    if (orig.time.nodeCheckPeriod != 2048) return false;
+    if (orig.time.allocDivisor != 20) return false;
+    if (orig.time.incDivisor != 2) return false;
+    if (orig.time.hardLimitMultiplier != 3.0) return false;
+
+    if (!orig.debug.enableNMP || !orig.debug.enableLMR || !orig.debug.enableAspiration ||
+        !orig.debug.enableCMH || !orig.debug.enableContHist || !orig.debug.enableCorrHist) {
+        return false;
+    }
+
+    // Verify mutation and propagation
+    EngineParameters modified = orig;
+    modified.search.nmpMinDepth = 4;
+    modified.debug.enableNMP = false;
+    controller.setParams(modified);
+
+    if (controller.getParams().search.nmpMinDepth != 4) return false;
+    if (controller.getParams().debug.enableNMP != false) return false;
+
+    // Restore clean production parameters
+    controller.setParams(orig);
+    return true;
+}
+
+bool testFourSectionBenchmarkTelemetry() {
+    auto& controller = SearchController::getInstance();
+    auto& stats = controller.getStats();
+
+    // Verify presence and reset behavior of new telemetry fields
+    stats.staticEvalCalls = 42;
+    stats.seeInvocations = 17;
+    stats.reset();
+
+    if (stats.staticEvalCalls != 0 || stats.seeInvocations != 0) return false;
+
+    // Run short depth search on tactical position to verify counter accumulation
+    auto posOpt = FenParser::parse("r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1");
+    if (!posOpt) return false;
+    Position pos = *posOpt;
+
+    Search::runSearch(pos, 2);
+
+    if (stats.staticEvalCalls == 0) return false;
+    if (stats.seeInvocations == 0) return false;
+    if (stats.completedDepth != 2) return false;
+
+    return true;
+}
+
+bool runMilestoneOmegaPhase1Tests() {
+    std::cout << "\n=================================================================\n";
+    std::cout << "===   MILESTONE OMEGA, PHASE 1: IDENTITY & ARCHITECTURE TESTS ===\n";
+    std::cout << "=================================================================\n";
+
+    int passed = 0;
+    int total = 3;
+
+    bool idPass = testEngineIdentitySubsystem();
+    std::cout << "[" << (idPass ? "PASS" : "FAIL") << "] Omega 1.1: Engine Identity Subsystem & Config Snapshot\n";
+    if (idPass) passed++;
+
+    bool paramPass = testHierarchicalParameterArchitecture();
+    std::cout << "[" << (paramPass ? "PASS" : "FAIL") << "] Omega 1.2: Hierarchical Parameter Architecture & Lifecycle\n";
+    if (paramPass) passed++;
+
+    bool telePass = testFourSectionBenchmarkTelemetry();
+    std::cout << "[" << (telePass ? "PASS" : "FAIL") << "] Omega 1.3: 4-Section Benchmark Telemetry & Evaluation Counters\n";
+    if (telePass) passed++;
+
+    std::cout << "\n=================================================================\n";
+    std::cout << "MILESTONE OMEGA PHASE 1 RESULT: " << passed << "/" << total << " Test Categories Passed.\n";
+    std::cout << "=================================================================\n";
+
+    return (passed == total);
+}
+
 void runDiagnostics() {
     std::cout << "\n==================================================\n";
     std::cout << "===   EXECUTING BOSON SUBSYSTEM DIAGNOSTICS   ===\n";
@@ -3462,6 +3668,7 @@ int main() {
     bool m6Module68Success = Boson::runMilestone6Module68Tests();
     bool m6Module69Success = Boson::runMilestone6Module69Tests();
     bool m6Module610Success = Boson::runMilestone6Module610Tests();
+    bool omegaPhase1Success = Boson::runMilestoneOmegaPhase1Tests();
     Boson::runDiagnostics();
-    return (m1Phase2Success && m1Module13Success && m2PhasesBCSuccess && m2PerftSuccess && phaseYZSuccess && phaseAASuccess && phaseABSuccess && m6Phase12Success && m6Module63Success && m6Module64Success && m6Module65Success && m6Module66Success && m6Module67Success && m6Module68Success && m6Module69Success && m6Module610Success) ? 0 : 1;
+    return (m1Phase2Success && m1Module13Success && m2PhasesBCSuccess && m2PerftSuccess && phaseYZSuccess && phaseAASuccess && phaseABSuccess && m6Phase12Success && m6Module63Success && m6Module64Success && m6Module65Success && m6Module66Success && m6Module67Success && m6Module68Success && m6Module69Success && m6Module610Success && omegaPhase1Success) ? 0 : 1;
 }

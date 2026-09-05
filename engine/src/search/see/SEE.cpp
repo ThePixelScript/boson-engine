@@ -1,4 +1,5 @@
 #include "search/see/SEE.hpp"
+#include "search/SearchController.hpp"
 #include "board/MoveGenerator.hpp"
 #include "evaluation/Evaluator.hpp"
 #include <algorithm>
@@ -145,6 +146,7 @@ Square SEE::getLeastValuableAttacker(const Position& pos, Bitboard attackers, Co
 }
 
 int SEE::evaluate(const Position& pos, Square fromSq, Square toSq) noexcept {
+    SearchController::getInstance().getStats().seeInvocations++;
     std::array<int, 32> gain{};
     int d = 0;
 

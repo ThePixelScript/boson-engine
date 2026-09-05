@@ -83,19 +83,25 @@ int Evaluator::evaluate(const Position& pos) noexcept {
         blackScore += (mg * phase + eg * (24 - phase)) / 24;
     }
 
+    auto& controller = SearchController::getInstance();
+    auto& stats = controller.getStats();
+    stats.staticEvalCalls++;
+
     int perspectiveScore = whiteScore - blackScore;
     int sign = (pos.getSideToMove() == Color::White) ? 1 : -1;
     int finalScore = perspectiveScore * sign;
 
-    // Read-only Correction History bias (zero side effects on external state)
-    int corrOffset = s_corrTable.probe(pos);
-    finalScore += corrOffset;
+    const auto& params = controller.getParams();
+    if (params.debug.enableCorrHist) {
+        // Read-only Correction History bias (zero side effects on external state)
+        int corrOffset = s_corrTable.probe(pos);
+        finalScore += corrOffset;
 
-    auto& stats = SearchController::getInstance().getStats();
-    stats.corrApplied++;
-    if (corrOffset > 0) stats.corrPositive++;
-    else if (corrOffset < 0) stats.corrNegative++;
-    stats.corrTotalMagnitude += std::abs(corrOffset);
+        stats.corrApplied++;
+        if (corrOffset > 0) stats.corrPositive++;
+        else if (corrOffset < 0) stats.corrNegative++;
+        stats.corrTotalMagnitude += std::abs(corrOffset);
+    }
 
     return finalScore;
 }

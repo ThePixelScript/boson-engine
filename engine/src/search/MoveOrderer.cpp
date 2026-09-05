@@ -43,10 +43,11 @@ void MoveOrderer::scoreAndSortMoves(
     int ply,
     Move prevMove
 ) noexcept {
+    const auto& params = SearchController::getInstance().getParams();
     std::array<int, 256> scores{};
 
     Move cmhMove;
-    if (prevMove.getRawData() != 0) {
+    if (params.debug.enableCMH && prevMove.getRawData() != 0) {
         cmhMove = Search::getCMH().getCounterMove(prevMove.getFromSquare(), prevMove.getToSquare());
         if (cmhMove.getRawData() == 0) {
             Piece prevPiece = findPieceAtSquare(pos, prevMove.getToSquare());
@@ -89,19 +90,19 @@ void MoveOrderer::scoreAndSortMoves(
             }
             else {
                 if (ply < 64) {
-                    if (m.getRawData() == killerMoves[ply][0].getRawData()) {
+                    if (params.search.killerSlotCount >= 1 && m.getRawData() == killerMoves[ply][0].getRawData()) {
                         score = SCORE_KILLER_1;
-                    } else if (m.getRawData() == killerMoves[ply][1].getRawData()) {
+                    } else if (params.search.killerSlotCount >= 2 && m.getRawData() == killerMoves[ply][1].getRawData()) {
                         score = SCORE_KILLER_2;
                     }
                     else {
-                        const bool isCmh = (cmhMove.getRawData() != 0 && m.getRawData() == cmhMove.getRawData());
+                        const bool isCmh = params.debug.enableCMH && (cmhMove.getRawData() != 0 && m.getRawData() == cmhMove.getRawData());
                         if (isCmh) {
                             stats.cmhHits++;
                         }
 
                         int conthistScore = 0;
-                        if (prevMove.getRawData() != 0 && attacker != Piece::None) {
+                        if (params.debug.enableContHist && prevMove.getRawData() != 0 && attacker != Piece::None) {
                             conthistScore = Search::getContHist().getScore(attacker, prevMove.getToSquare(), m.getToSquare());
                             if (conthistScore > 0) {
                                 stats.conthistHits++;

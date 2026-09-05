@@ -289,7 +289,7 @@ bool VerificationHarness::verifyMakeUndoIntegrity(const std::string& fen, int de
 
 bool VerificationHarness::runComprehensivePerft() noexcept {
     std::cout << "\n=================================================================\n";
-    std::cout << "🏛️  BOSON MODULE Ω.1 — RUNNING ALL-IN-ONE REALITY STRESS MATRIX\n";
+    std::cout << "BOSON MODULE OMEGA.1: REALITY STRESS MATRIX\n";
     std::cout << "=================================================================\n";
     
     struct LocalTestCase {
@@ -324,9 +324,9 @@ bool VerificationHarness::runComprehensivePerft() noexcept {
                   << " (Depth " << test.targetDepth << ")... ";
         
         if (actualNodes == test.nodesExpected) {
-            std::cout << "✅ PASSED\n";
+            std::cout << "[PASS]\n";
         } else {
-            std::cout << "❌ MISMATCH!\n"
+            std::cout << "[FAIL] MISMATCH!\n"
                       << "     Expected: " << test.nodesExpected << "\n"
                       << "     Actual:   " << actualNodes << "\n";
             allPassed.store(false, std::memory_order_relaxed);

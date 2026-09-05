@@ -72,6 +72,9 @@ struct SearchStatistics {
     uint32_t corrPositive{0};
     uint32_t corrNegative{0};
     int64_t corrTotalMagnitude{0};
+    // Milestone Omega Telemetry Counters
+    uint64_t staticEvalCalls{0};
+    uint64_t seeInvocations{0};
 
     void reset() noexcept {
         nodes = qNodes = ttHits = betaCutoffs = elapsedTimeMs = completedDepth = 0;
@@ -87,6 +90,7 @@ struct SearchStatistics {
         conthistHits = conthistCutoffs = normalizationEvents = 0;
         corrUpdates = corrApplied = corrPositive = corrNegative = 0;
         corrTotalMagnitude = 0;
+        staticEvalCalls = seeInvocations = 0;
     }
 };
 

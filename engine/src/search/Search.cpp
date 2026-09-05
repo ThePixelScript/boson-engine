@@ -65,7 +65,9 @@ int Search::quiescence(Position& pos, int alpha, int beta, int ply) noexcept {
     auto& stats = controller.getStats();
     stats.qNodes++;
 
-    if (stats.qNodes % NODE_CHECK_PERIOD == 0) {
+    const auto& params = controller.getParams();
+    uint64_t checkPeriod = (params.time.nodeCheckPeriod > 0) ? params.time.nodeCheckPeriod : 2048;
+    if (stats.qNodes % checkPeriod == 0) {
         controller.checkTime();
     }
     if (controller.shouldStop()) return 0;
@@ -116,11 +118,13 @@ int Search::quiescence(Position& pos, int alpha, int beta, int ply) noexcept {
 int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLine& pv, bool allowNull, Move prevMove) noexcept {
     auto& controller = SearchController::getInstance();
     auto& stats = controller.getStats();
+    const auto& params = controller.getParams();
 
     stats.nodes++;
     pv.count = 0;
 
-    if (stats.nodes % NODE_CHECK_PERIOD == 0) {
+    uint64_t nodeCheckPeriod = (params.time.nodeCheckPeriod > 0) ? params.time.nodeCheckPeriod : 2048;
+    if (stats.nodes % nodeCheckPeriod == 0) {
         controller.checkTime();
         if (controller.getLimits().nodes > 0 && stats.nodes >= static_cast<uint64_t>(controller.getLimits().nodes)) {
             controller.requestStop(StopReason::NodesLimit);
@@ -179,8 +183,8 @@ int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLi
         if (staticEval - margin >= beta) return staticEval - margin;
     }
 
-    constexpr int R = 2; 
-    if (allowNull && depth >= 3 && !inCheck && staticEval >= beta) {
+    int R = params.search.nmpReduction; 
+    if (params.debug.enableNMP && allowNull && depth >= params.search.nmpMinDepth && !inCheck && staticEval >= beta) {
         if (pos.hasNonPawnMaterial(pos.getSideToMove())) {
             stats.nullAttempts++;
             stats.nullMoveAttempts++;
@@ -257,9 +261,9 @@ int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLi
         // 6. Move is not a TT PV move (!isPvMove).
         // 7. Move does not attack the enemy king zone (!inEnemyKingZone).
         const bool isPvMove = (ttMove.getRawData() != 0 && m.getRawData() == ttMove.getRawData());
-        const bool isEarlyMove = (movesSearched <= 3);
+        const bool isLateMove = (movesSearched >= params.search.lmrMinMoveCount);
 
-        if (searchedDepth >= 3 && !isEarlyMove && !isPvMove && !inCheck && !isCaptureMove && !isPromotionMove && !givesCheck && !inEnemyKingZone) {
+        if (params.debug.enableLMR && searchedDepth >= params.search.lmrMinDepth && isLateMove && !isPvMove && !inCheck && !isCaptureMove && !isPromotionMove && !givesCheck && !inEnemyKingZone) {
             reduction = LMRPolicy::getReduction(searchedDepth, movesSearched);
 
             // Killer Move discount: Proven refutations receive reduced reduction
@@ -389,7 +393,7 @@ int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLi
     if (bestScore <= originalAlpha)   storeType = TTNodeType::UpperBound;
     else if (bestScore >= beta)      storeType = TTNodeType::LowerBound;
 
-    if (!inCheck && depth >= 2 && std::abs(bestScore) < MATE - 100) {
+    if (params.debug.enableCorrHist && !inCheck && depth >= 2 && std::abs(bestScore) < MATE - 100) {
         int evalVal = evaluate(pos);
         if (storeType == TTNodeType::Exact || 
             (storeType == TTNodeType::LowerBound && bestScore > evalVal) ||
@@ -408,8 +412,14 @@ int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLi
 int Search::searchWithAspiration(Position& pos, int depth, int prevScore, PVLine& pv) noexcept {
     auto& controller = SearchController::getInstance();
     auto& stats = controller.getStats();
+    const auto& params = controller.getParams();
 
-    int delta = ASPIRATION_INITIAL_DELTA;
+    if (!params.debug.enableAspiration) {
+        return negamax(pos, depth, -INF, INF, 0, pv, true, Move());
+    }
+
+    int delta = params.search.aspirationInitialDelta;
+    int maxDelta = params.search.aspirationMaxDelta;
     int alpha = std::max(-INF, prevScore - delta);
     int beta = std::min(INF, prevScore + delta);
     int score = prevScore;
@@ -437,7 +447,7 @@ int Search::searchWithAspiration(Position& pos, int depth, int prevScore, PVLine
 
             alpha = std::max(-INF, alpha - delta * 2);
             delta *= 2;
-            if (delta > ASPIRATION_MAX_DELTA || alpha <= -INF) {
+            if (delta > maxDelta || alpha <= -INF) {
                 alpha = -INF;
                 beta = INF;
             }
@@ -450,7 +460,7 @@ int Search::searchWithAspiration(Position& pos, int depth, int prevScore, PVLine
 
             beta = std::min(INF, beta + delta * 2);
             delta *= 2;
-            if (delta > ASPIRATION_MAX_DELTA || beta >= INF) {
+            if (delta > maxDelta || beta >= INF) {
                 alpha = -INF;
                 beta = INF;
             }
@@ -612,6 +622,8 @@ int Search::runSearch(Position& pos, const SearchLimits& limits) noexcept {
     std::cout << "  -> Total Correction Mag    : " << stats.corrTotalMagnitude << " cp\n";
     std::cout << "=================================================================\n";
     
+    controller.printBenchmarkReport(maxDepth, 16, 1);
+
     return lastScore;
 }
 
