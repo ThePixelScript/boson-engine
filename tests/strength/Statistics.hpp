@@ -13,7 +13,10 @@ public:
     [[nodiscard]] static double calculateSampleVariance(uint32_t wins, uint32_t draws, uint32_t losses, uint32_t totalGames, double p) noexcept;
     [[nodiscard]] static double calculateStandardError(double variance, uint32_t totalGames) noexcept;
 
+    static void calculateWilsonInterval(double p, uint32_t totalGames, double& outRawLower, double& outRawUpper) noexcept;
     static void calculateScoreConfidenceInterval(double p, double se, uint32_t totalGames, double& outLow, double& outHigh) noexcept;
+
+    [[nodiscard]] static ConfidenceInterval calculateConfidenceInterval(double p, uint32_t totalGames) noexcept;
 
     [[nodiscard]] static double eloFromScore(double p, double eps = 1e-6) noexcept;
     static void calculateEloConfidenceInterval(double scoreLow, double scoreHigh, double& outEloLow, double& outEloHigh) noexcept;

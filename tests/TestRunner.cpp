@@ -3880,53 +3880,201 @@ bool runMilestoneOmegaPhase4BenchmarkTests() {
 bool testGateOmega5D_StatisticalCorrectness() {
     // 1. 0W / 0D / 100L
     MatchStatistics s1 = Statistics::computeStatistics(0, 0, 100);
-    if (s1.score != 0.0) { std::cerr << "[DEBUG 5D] 1.1 failed: score=" << s1.score << "\n"; return false; }
-    if (s1.sampleVariance != 0.0) { std::cerr << "[DEBUG 5D] 1.2 failed: var=" << s1.sampleVariance << "\n"; return false; }
-    if (std::abs(s1.scoreLow - 0.005) > 1e-6 || std::abs(s1.scoreHigh - 0.005) > 1e-6) {
-        std::cerr << "[DEBUG 5D] 1.3 failed: low=" << s1.scoreLow << ", high=" << s1.scoreHigh << "\n"; return false;
+    if (s1.observedScore != 0.0 || s1.score != 0.0) {
+        std::cerr << "[DEBUG 5D] 1.1 failed: observedScore=" << s1.observedScore << "\n";
+        return false;
     }
-    if (s1.deltaElo >= -800.0) { std::cerr << "[DEBUG 5D] 1.4 failed: elo=" << s1.deltaElo << "\n"; return false; }
-    if (s1.sprt.llr >= 0.0) { std::cerr << "[DEBUG 5D] 1.5 failed: llr=" << s1.sprt.llr << "\n"; return false; }
+    if (s1.sampleVariance != 0.0) {
+        std::cerr << "[DEBUG 5D] 1.2 failed: var=" << s1.sampleVariance << "\n";
+        return false;
+    }
+    // raw Wilson ~ [0.0000, 0.03699]
+    if (std::abs(s1.rawWilsonLower - 0.0000) > 1e-4 || std::abs(s1.rawWilsonUpper - 0.03699) > 1e-4) {
+        std::cerr << "[DEBUG 5D] 1.3 failed: rawWilson=[" << s1.rawWilsonLower << ", " << s1.rawWilsonUpper << "]\n";
+        return false;
+    }
+    // eloScore ~ [1e-6, 0.0370]
+    if (std::abs(s1.eloScoreLower - 1e-6) > 1e-9 || std::abs(s1.eloScoreUpper - 0.0370) > 1e-3) {
+        std::cerr << "[DEBUG 5D] 1.4 failed: eloScore=[" << s1.eloScoreLower << ", " << s1.eloScoreUpper << "]\n";
+        return false;
+    }
+    // Elo CI ~ [-2400.0, -566.20] (non-zero width)
+    if (std::abs(s1.eloLower - (-2400.0)) > 1.0 || std::abs(s1.eloUpper - (-566.20)) > 1.0) {
+        std::cerr << "[DEBUG 5D] 1.5 failed: elo=[" << s1.eloLower << ", " << s1.eloUpper << "]\n";
+        return false;
+    }
+    if (s1.eloUpper <= s1.eloLower) {
+        std::cerr << "[DEBUG 5D] 1.6 failed: non-positive width\n";
+        return false;
+    }
+    if (s1.sprt.llr >= 0.0) {
+        std::cerr << "[DEBUG 5D] 1.7 failed: llr=" << s1.sprt.llr << "\n";
+        return false;
+    }
     // SPRT transition: at 150 losses, LLR <= -2.944 (AcceptH0)
     MatchStatistics s1_150 = Statistics::computeStatistics(0, 0, 150);
     if (s1_150.sprt.decision != SPRTDecision::AcceptH0) {
-        std::cerr << "[DEBUG 5D] 1.6 failed: dec=" << (int)s1_150.sprt.decision << ", llr=" << s1_150.sprt.llr << "\n"; return false;
+        std::cerr << "[DEBUG 5D] 1.8 failed: dec=" << (int)s1_150.sprt.decision << ", llr=" << s1_150.sprt.llr << "\n";
+        return false;
     }
 
-    // 2. 0W / 100D / 0L
-    MatchStatistics s2 = Statistics::computeStatistics(0, 100, 0);
-    if (s2.score != 0.5) { std::cerr << "[DEBUG 5D] 2.1 failed\n"; return false; }
-    if (s2.sampleVariance != 0.0) { std::cerr << "[DEBUG 5D] 2.2 failed: var=" << s2.sampleVariance << "\n"; return false; }
-    if (std::abs(s2.scoreLow - 0.5) > 1e-6 || std::abs(s2.scoreHigh - 0.5) > 1e-6) { std::cerr << "[DEBUG 5D] 2.3 failed\n"; return false; }
-    if (std::abs(s2.deltaElo) > 1e-6) { std::cerr << "[DEBUG 5D] 2.4 failed\n"; return false; }
-    if (std::abs(s2.eloLow) > 1e-6 || std::abs(s2.eloHigh) > 1e-6) { std::cerr << "[DEBUG 5D] 2.5 failed\n"; return false; }
-
-    // 3. 50W / 0D / 50L
-    MatchStatistics s3 = Statistics::computeStatistics(50, 0, 50);
-    if (s3.score != 0.5) { std::cerr << "[DEBUG 5D] 3.1 failed\n"; return false; }
-    if (std::abs(s3.sampleVariance - (25.0 / 99.0)) > 1e-5) { std::cerr << "[DEBUG 5D] 3.2 failed: var=" << s3.sampleVariance << "\n"; return false; }
-    if (std::abs(s3.deltaElo) > 1e-6) { std::cerr << "[DEBUG 5D] 3.3 failed\n"; return false; }
-    if (s3.eloLow >= 0.0 || s3.eloHigh <= 0.0) { std::cerr << "[DEBUG 5D] 3.4 failed\n"; return false; }
-    if (std::abs(s3.eloLow + s3.eloHigh) > 1e-4) { std::cerr << "[DEBUG 5D] 3.5 failed\n"; return false; }
-
-    // 4. 100W / 0D / 0L
+    // 2. 100W / 0D / 0L
     MatchStatistics s4 = Statistics::computeStatistics(100, 0, 0);
-    if (s4.score != 1.0) { std::cerr << "[DEBUG 5D] 4.1 failed\n"; return false; }
-    if (s4.sampleVariance != 0.0) { std::cerr << "[DEBUG 5D] 4.2 failed\n"; return false; }
-    if (std::abs(s4.scoreLow - 0.995) > 1e-6 || std::abs(s4.scoreHigh - 0.995) > 1e-6) { std::cerr << "[DEBUG 5D] 4.3 failed\n"; return false; }
-    if (s4.deltaElo <= 800.0) { std::cerr << "[DEBUG 5D] 4.4 failed\n"; return false; }
-    if (s4.sprt.llr <= 0.0) { std::cerr << "[DEBUG 5D] 4.5 failed\n"; return false; }
+    if (s4.observedScore != 1.0 || s4.score != 1.0) {
+        std::cerr << "[DEBUG 5D] 2.1 failed: observedScore=" << s4.observedScore << "\n";
+        return false;
+    }
+    if (s4.sampleVariance != 0.0) {
+        std::cerr << "[DEBUG 5D] 2.2 failed: var=" << s4.sampleVariance << "\n";
+        return false;
+    }
+    // raw Wilson ~ [0.96301, 1.0000]
+    if (std::abs(s4.rawWilsonLower - 0.96301) > 1e-4 || std::abs(s4.rawWilsonUpper - 1.0000) > 1e-4) {
+        std::cerr << "[DEBUG 5D] 2.3 failed: rawWilson=[" << s4.rawWilsonLower << ", " << s4.rawWilsonUpper << "]\n";
+        return false;
+    }
+    // eloScore ~ [0.9630, 0.999999]
+    if (std::abs(s4.eloScoreLower - 0.9630) > 1e-3 || std::abs(s4.eloScoreUpper - (1.0 - 1e-6)) > 1e-9) {
+        std::cerr << "[DEBUG 5D] 2.4 failed: eloScore=[" << s4.eloScoreLower << ", " << s4.eloScoreUpper << "]\n";
+        return false;
+    }
+    // Elo CI ~ [+566.20, +2400.0] (non-zero width)
+    if (std::abs(s4.eloLower - 566.20) > 1.0 || std::abs(s4.eloUpper - 2400.0) > 1.0) {
+        std::cerr << "[DEBUG 5D] 2.5 failed: elo=[" << s4.eloLower << ", " << s4.eloUpper << "]\n";
+        return false;
+    }
+    if (s4.eloUpper <= s4.eloLower) {
+        std::cerr << "[DEBUG 5D] 2.6 failed: non-positive width\n";
+        return false;
+    }
+    if (s4.sprt.llr <= 0.0) {
+        std::cerr << "[DEBUG 5D] 2.7 failed: llr=" << s4.sprt.llr << "\n";
+        return false;
+    }
     // SPRT transition: at 150 wins, LLR >= +2.944 (AcceptH1)
     MatchStatistics s4_150 = Statistics::computeStatistics(150, 0, 0);
-    if (s4_150.sprt.decision != SPRTDecision::AcceptH1) { std::cerr << "[DEBUG 5D] 4.6 failed\n"; return false; }
+    if (s4_150.sprt.decision != SPRTDecision::AcceptH1) {
+        std::cerr << "[DEBUG 5D] 2.8 failed: dec=" << (int)s4_150.sprt.decision << "\n";
+        return false;
+    }
 
-    // 5. Mixed: 45W / 30D / 25L
+    // 3. 0W / 100D / 0L: deltaElo == 0.0
+    MatchStatistics s2 = Statistics::computeStatistics(0, 100, 0);
+    if (s2.observedScore != 0.5) { std::cerr << "[DEBUG 5D] 3.1 failed\n"; return false; }
+    if (s2.sampleVariance != 0.0) { std::cerr << "[DEBUG 5D] 3.2 failed\n"; return false; }
+    if (s2.deltaElo != 0.0) { std::cerr << "[DEBUG 5D] 3.3 failed: deltaElo=" << s2.deltaElo << "\n"; return false; }
+    if (std::abs(s2.rawWilsonLower + s2.rawWilsonUpper - 1.0) > 1e-6) { std::cerr << "[DEBUG 5D] 3.4 failed\n"; return false; }
+    if (std::abs(s2.eloLower + s2.eloUpper) > 1e-6) { std::cerr << "[DEBUG 5D] 3.5 failed\n"; return false; }
+
+    // 4. 50W / 0D / 50L: deltaElo == 0.0
+    MatchStatistics s3 = Statistics::computeStatistics(50, 0, 50);
+    if (s3.observedScore != 0.5) { std::cerr << "[DEBUG 5D] 4.1 failed\n"; return false; }
+    if (std::abs(s3.sampleVariance - (25.0 / 99.0)) > 1e-5) { std::cerr << "[DEBUG 5D] 4.2 failed\n"; return false; }
+    if (s3.deltaElo != 0.0) { std::cerr << "[DEBUG 5D] 4.3 failed: deltaElo=" << s3.deltaElo << "\n"; return false; }
+    if (std::abs(s3.rawWilsonLower + s3.rawWilsonUpper - 1.0) > 1e-6) { std::cerr << "[DEBUG 5D] 4.4 failed\n"; return false; }
+    if (std::abs(s3.eloLower + s3.eloUpper) > 1e-6) { std::cerr << "[DEBUG 5D] 4.5 failed\n"; return false; }
+
+    // 5. 45W / 30D / 25L: deltaElo > 0, rawWilson bounds strictly inside (0, 1)
     MatchStatistics s5 = Statistics::computeStatistics(45, 30, 25);
-    if (std::abs(s5.score - 0.60) > 1e-6) { std::cerr << "[DEBUG 5D] 5.1 failed\n"; return false; }
-    if (s5.sampleVariance <= 0.0) { std::cerr << "[DEBUG 5D] 5.2 failed\n"; return false; }
-    if (s5.deltaElo <= 0.0) { std::cerr << "[DEBUG 5D] 5.3 failed\n"; return false; }
-    if (s5.scoreLow >= s5.score || s5.score >= s5.scoreHigh) { std::cerr << "[DEBUG 5D] 5.4 failed\n"; return false; }
-    if (s5.eloLow >= s5.deltaElo || s5.deltaElo >= s5.eloHigh) { std::cerr << "[DEBUG 5D] 5.5 failed\n"; return false; }
+    if (std::abs(s5.observedScore - 0.60) > 1e-6) { std::cerr << "[DEBUG 5D] 5.1 failed\n"; return false; }
+    if (s5.deltaElo <= 0.0) { std::cerr << "[DEBUG 5D] 5.2 failed: deltaElo=" << s5.deltaElo << "\n"; return false; }
+    if (s5.rawWilsonLower <= 0.0 || s5.rawWilsonUpper >= 1.0) {
+        std::cerr << "[DEBUG 5D] 5.3 failed: rawWilson bounds not strictly inside (0, 1)\n";
+        return false;
+    }
+    if (s5.rawWilsonLower >= s5.observedScore || s5.observedScore >= s5.rawWilsonUpper) {
+        std::cerr << "[DEBUG 5D] 5.4 failed: observedScore not inside rawWilson bounds\n";
+        return false;
+    }
+    if (s5.eloLower >= s5.deltaElo || s5.deltaElo >= s5.eloUpper) {
+        std::cerr << "[DEBUG 5D] 5.5 failed: deltaElo not inside elo bounds\n";
+        return false;
+    }
+
+    // 6. N = 1 edge case: (1W/0D/0L and 0W/0D/1L) executes cleanly without division-by-zero or NaN
+    MatchStatistics s_1w = Statistics::computeStatistics(1, 0, 0);
+    if (s_1w.observedScore != 1.0) { std::cerr << "[DEBUG 5D] 6.1 failed\n"; return false; }
+    if (s_1w.sampleVariance != 0.0) { std::cerr << "[DEBUG 5D] 6.2 failed\n"; return false; }
+    if (!std::isfinite(s_1w.deltaElo) || !std::isfinite(s_1w.eloLower) || !std::isfinite(s_1w.eloUpper) ||
+        !std::isfinite(s_1w.rawWilsonLower) || !std::isfinite(s_1w.rawWilsonUpper)) {
+        std::cerr << "[DEBUG 5D] 6.3 failed: non-finite outputs in N=1 1W\n";
+        return false;
+    }
+    if ((s_1w.eloUpper - s_1w.eloLower) <= 100.0) {
+        std::cerr << "[DEBUG 5D] 6.4 failed: N=1 1W CI width <= 100: " << (s_1w.eloUpper - s_1w.eloLower) << "\n";
+        return false;
+    }
+    if (!(s_1w.eloLower <= s_1w.deltaElo && s_1w.deltaElo <= s_1w.eloUpper)) {
+        std::cerr << "[DEBUG 5D] 6.5 failed: N=1 1W Elo ordering violation: "
+                  << s_1w.eloLower << " <= " << s_1w.deltaElo << " <= " << s_1w.eloUpper << "\n";
+        return false;
+    }
+
+    MatchStatistics s_1l = Statistics::computeStatistics(0, 0, 1);
+    if (s_1l.observedScore != 0.0) { std::cerr << "[DEBUG 5D] 6.6 failed\n"; return false; }
+    if (s_1l.sampleVariance != 0.0) { std::cerr << "[DEBUG 5D] 6.7 failed\n"; return false; }
+    if (!std::isfinite(s_1l.deltaElo) || !std::isfinite(s_1l.eloLower) || !std::isfinite(s_1l.eloUpper) ||
+        !std::isfinite(s_1l.rawWilsonLower) || !std::isfinite(s_1l.rawWilsonUpper)) {
+        std::cerr << "[DEBUG 5D] 6.8 failed: non-finite outputs in N=1 1L\n";
+        return false;
+    }
+    if ((s_1l.eloUpper - s_1l.eloLower) <= 100.0) {
+        std::cerr << "[DEBUG 5D] 6.9 failed: N=1 1L CI width <= 100: " << (s_1l.eloUpper - s_1l.eloLower) << "\n";
+        return false;
+    }
+    if (!(s_1l.eloLower <= s_1l.deltaElo && s_1l.deltaElo <= s_1l.eloUpper)) {
+        std::cerr << "[DEBUG 5D] 6.10 failed: N=1 1L Elo ordering violation: "
+                  << s_1l.eloLower << " <= " << s_1l.deltaElo << " <= " << s_1l.eloUpper << "\n";
+        return false;
+    }
+    if (std::abs(s_1w.eloLower + s_1l.eloUpper) > 1e-6 || std::abs(s_1w.eloUpper + s_1l.eloLower) > 1e-6) {
+        std::cerr << "[DEBUG 5D] 6.11 failed: N=1 Elo reflection symmetry broken\n";
+        return false;
+    }
+
+    // 7. Symmetry assertion: CI(100W/0L) mirrors CI(0W/100L) about 0
+    if (std::abs(s4.eloLower + s1.eloUpper) > 1e-6 || std::abs(s4.eloUpper + s1.eloLower) > 1e-6) {
+        std::cerr << "[DEBUG 5D] 7.1 failed: Elo CI symmetry broken: s4=[" << s4.eloLower << ", " << s4.eloUpper << "], s1=[" << s1.eloLower << ", " << s1.eloUpper << "]\n";
+        return false;
+    }
+    if (std::abs(s4.deltaElo + s1.deltaElo) > 1e-6) {
+        std::cerr << "[DEBUG 5D] 7.2 failed: Delta Elo symmetry broken\n";
+        return false;
+    }
+    if (std::abs(s4.rawWilsonLower + s1.rawWilsonUpper - 1.0) > 1e-6 ||
+        std::abs(s4.rawWilsonUpper + s1.rawWilsonLower - 1.0) > 1e-6) {
+        std::cerr << "[DEBUG 5D] 7.3 failed: Wilson CI symmetry broken\n";
+        return false;
+    }
+    if (std::abs(s4.eloScoreLower + s1.eloScoreUpper - 1.0) > 1e-6 ||
+        std::abs(s4.eloScoreUpper + s1.eloScoreLower - 1.0) > 1e-6) {
+        std::cerr << "[DEBUG 5D] 7.4 failed: Elo score symmetry broken\n";
+        return false;
+    }
+
+    // 8. Monotonicity assertion: higher score never produces lower deltaElo
+    const std::vector<std::pair<uint32_t, uint32_t>> testPoints = {
+        {0, 100}, {10, 90}, {25, 75}, {40, 60}, {50, 50}, {60, 40}, {75, 25}, {90, 10}, {100, 0}
+    };
+    for (size_t i = 1; i < testPoints.size(); ++i) {
+        MatchStatistics prev = Statistics::computeStatistics(testPoints[i - 1].first, 0, testPoints[i - 1].second);
+        MatchStatistics curr = Statistics::computeStatistics(testPoints[i].first, 0, testPoints[i].second);
+        if (curr.deltaElo < prev.deltaElo) {
+            std::cerr << "[DEBUG 5D] 8.1 failed: Monotonicity violation in deltaElo: "
+                      << prev.deltaElo << " vs " << curr.deltaElo << "\n";
+            return false;
+        }
+        if (curr.eloLower < prev.eloLower) {
+            std::cerr << "[DEBUG 5D] 8.2 failed: Monotonicity violation in eloLower: "
+                      << prev.eloLower << " vs " << curr.eloLower << "\n";
+            return false;
+        }
+        if (curr.eloUpper < prev.eloUpper) {
+            std::cerr << "[DEBUG 5D] 8.3 failed: Monotonicity violation in eloUpper: "
+                      << prev.eloUpper << " vs " << curr.eloUpper << "\n";
+            return false;
+        }
+    }
 
     return true;
 }

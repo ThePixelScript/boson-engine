@@ -1,4 +1,7 @@
 #include "strength/Statistics.hpp"
+#include <cassert>
+#include <cmath>
+#include <algorithm>
 
 namespace Boson {
 
@@ -25,18 +28,80 @@ double Statistics::calculateStandardError(double variance, uint32_t totalGames) 
     return std::sqrt(variance / static_cast<double>(totalGames));
 }
 
-void Statistics::calculateScoreConfidenceInterval(double p, double se, uint32_t totalGames, double& outLow, double& outHigh) noexcept {
+void Statistics::calculateWilsonInterval(double p, uint32_t totalGames, double& outRawLower, double& outRawUpper) noexcept {
     if (totalGames == 0) {
-        outLow = 0.0;
-        outHigh = 1.0;
+        outRawLower = 0.0;
+        outRawUpper = 1.0;
         return;
     }
-    double eps = 1.0 / (2.0 * static_cast<double>(totalGames));
-    outLow = std::clamp(p - 1.96 * se, eps, 1.0 - eps);
-    outHigh = std::clamp(p + 1.96 * se, eps, 1.0 - eps);
-    if (outLow > outHigh) {
-        std::swap(outLow, outHigh);
+    const double N = static_cast<double>(totalGames);
+    const double z = 1.959963984540054;
+    const double zSq = z * z;
+    const double denominator = 1.0 + (zSq / N);
+    const double center = (p + (zSq / (2.0 * N))) / denominator;
+    const double radicand = (p * (1.0 - p) / N) + (zSq / (4.0 * N * N));
+    const double halfWidth = (z * std::sqrt(std::max(0.0, radicand))) / denominator;
+
+    outRawLower = std::max(0.0, center - halfWidth);
+    outRawUpper = std::min(1.0, center + halfWidth);
+}
+
+void Statistics::calculateScoreConfidenceInterval(double p, double se, uint32_t totalGames, double& outLow, double& outHigh) noexcept {
+    (void)se;
+    calculateWilsonInterval(p, totalGames, outLow, outHigh);
+}
+
+ConfidenceInterval Statistics::calculateConfidenceInterval(double p, uint32_t totalGames) noexcept {
+    ConfidenceInterval ci;
+    ci.observedScore = p;
+
+    if (totalGames == 0) {
+        ci.rawWilsonLower = 0.0;
+        ci.rawWilsonUpper = 1.0;
+        ci.eloScoreLower = 0.0;
+        ci.eloScoreUpper = 1.0;
+        ci.deltaElo = 0.0;
+        ci.eloLower = 0.0;
+        ci.eloUpper = 0.0;
+        return ci;
     }
+
+    const double N = static_cast<double>(totalGames);
+    const double z = 1.959963984540054;
+    const double zSq = z * z;
+    const double denominator = 1.0 + (zSq / N);
+    const double center = (p + (zSq / (2.0 * N))) / denominator;
+    const double radicand = (p * (1.0 - p) / N) + (zSq / (4.0 * N * N));
+    const double halfWidth = (z * std::sqrt(std::max(0.0, radicand))) / denominator;
+
+    ci.rawWilsonLower = std::max(0.0, center - halfWidth);
+    ci.rawWilsonUpper = std::min(1.0, center + halfWidth);
+
+    // Decouple numerical domain guard from sample size N using fixed constant
+    constexpr double kLogisticEpsilon = 1e-6;
+    ci.eloScoreLower = std::clamp(ci.rawWilsonLower, kLogisticEpsilon, 1.0 - kLogisticEpsilon);
+    ci.eloScoreUpper = std::clamp(ci.rawWilsonUpper, kLogisticEpsilon, 1.0 - kLogisticEpsilon);
+    const double p_clamped = std::clamp(p, kLogisticEpsilon, 1.0 - kLogisticEpsilon);
+
+    if (std::abs(p - 0.5) < 1e-12) {
+        ci.deltaElo = 0.0;
+    } else {
+        ci.deltaElo = 400.0 * std::log10(p_clamped / (1.0 - p_clamped));
+    }
+
+    ci.eloLower = 400.0 * std::log10(ci.eloScoreLower / (1.0 - ci.eloScoreLower));
+    ci.eloUpper = 400.0 * std::log10(ci.eloScoreUpper / (1.0 - ci.eloScoreUpper));
+
+    assert(std::isfinite(ci.observedScore));
+    assert(std::isfinite(ci.rawWilsonLower));
+    assert(std::isfinite(ci.rawWilsonUpper));
+    assert(std::isfinite(ci.eloScoreLower));
+    assert(std::isfinite(ci.eloScoreUpper));
+    assert(std::isfinite(ci.deltaElo));
+    assert(std::isfinite(ci.eloLower));
+    assert(std::isfinite(ci.eloUpper));
+
+    return ci;
 }
 
 double Statistics::eloFromScore(double p, double eps) noexcept {
@@ -89,10 +154,22 @@ MatchStatistics Statistics::computeStatistics(uint32_t wins, uint32_t draws, uin
     stats.sampleVariance = calculateSampleVariance(wins, draws, losses, stats.totalGames, stats.score);
     stats.standardError = calculateStandardError(stats.sampleVariance, stats.totalGames);
 
-    calculateScoreConfidenceInterval(stats.score, stats.standardError, stats.totalGames, stats.scoreLow, stats.scoreHigh);
+    stats.ci = calculateConfidenceInterval(stats.score, stats.totalGames);
 
-    stats.deltaElo = eloFromScore(stats.score);
-    calculateEloConfidenceInterval(stats.scoreLow, stats.scoreHigh, stats.eloLow, stats.eloHigh);
+    stats.observedScore = stats.ci.observedScore;
+    stats.rawWilsonLower = stats.ci.rawWilsonLower;
+    stats.rawWilsonUpper = stats.ci.rawWilsonUpper;
+    stats.eloScoreLower = stats.ci.eloScoreLower;
+    stats.eloScoreUpper = stats.ci.eloScoreUpper;
+    stats.deltaElo = stats.ci.deltaElo;
+    stats.eloLower = stats.ci.eloLower;
+    stats.eloUpper = stats.ci.eloUpper;
+
+    // Backward-compatibility aliases
+    stats.scoreLow = stats.ci.rawWilsonLower;
+    stats.scoreHigh = stats.ci.rawWilsonUpper;
+    stats.eloLow = stats.ci.eloLower;
+    stats.eloHigh = stats.ci.eloUpper;
 
     stats.sprt = evaluateSPRT(wins, draws, losses, elo0, elo1, alpha, beta);
 

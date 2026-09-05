@@ -36,10 +36,10 @@ void StrengthReporter::printConsoleReport(const MatchRecord& record, std::ostrea
     out << std::setprecision(4);
     out << "  Sample Variance:  " << st.sampleVariance << " | Std Error: " << st.standardError << "\n";
     out << std::setprecision(1);
-    out << "  Score 95% CI:     [" << (st.scoreLow * 100.0) << "%, " << (st.scoreHigh * 100.0) << "%]\n";
+    out << "  Score 95% CI:     [" << (st.rawWilsonLower * 100.0) << "%, " << (st.rawWilsonUpper * 100.0) << "%]\n";
     out << "  Delta Elo:        " << (st.deltaElo >= 0 ? "+" : "") << st.deltaElo << " Elo\n";
-    out << "  Elo 95% CI:       [" << (st.eloLow >= 0 ? "+" : "") << st.eloLow << ", "
-        << (st.eloHigh >= 0 ? "+" : "") << st.eloHigh << "] Elo\n";
+    out << "  Elo 95% CI:       [" << (st.eloLower >= 0 ? "+" : "") << st.eloLower << ", "
+        << (st.eloUpper >= 0 ? "+" : "") << st.eloUpper << "] Elo\n";
     out << std::setprecision(2);
     out << "  SPRT Status:      " << sprtDecisionToString(st.sprt.decision)
         << " (LLR: " << st.sprt.llr << " [" << st.sprt.lowerBound << ", " << st.sprt.upperBound << "])\n";
@@ -91,15 +91,22 @@ std::string StrengthReporter::serializeJson(const MatchRecord& record) {
     json << "    \"totalGames\": " << st.totalGames << ",\n";
     json << std::setprecision(4);
     json << "    \"score\": " << st.score << ",\n";
+    json << "    \"observedScore\": " << st.observedScore << ",\n";
     json << std::setprecision(2);
     json << "    \"scorePercentage\": " << st.scorePercentage << ",\n";
     json << std::setprecision(6);
     json << "    \"sampleVariance\": " << st.sampleVariance << ",\n";
     json << "    \"standardError\": " << st.standardError << ",\n";
+    json << "    \"rawWilsonLower\": " << st.rawWilsonLower << ",\n";
+    json << "    \"rawWilsonUpper\": " << st.rawWilsonUpper << ",\n";
+    json << "    \"eloScoreLower\": " << st.eloScoreLower << ",\n";
+    json << "    \"eloScoreUpper\": " << st.eloScoreUpper << ",\n";
     json << "    \"scoreLow\": " << st.scoreLow << ",\n";
     json << "    \"scoreHigh\": " << st.scoreHigh << ",\n";
     json << std::setprecision(2);
     json << "    \"deltaElo\": " << st.deltaElo << ",\n";
+    json << "    \"eloLower\": " << st.eloLower << ",\n";
+    json << "    \"eloUpper\": " << st.eloUpper << ",\n";
     json << "    \"eloLow\": " << st.eloLow << ",\n";
     json << "    \"eloHigh\": " << st.eloHigh << ",\n";
     json << "    \"sprt\": {\n";

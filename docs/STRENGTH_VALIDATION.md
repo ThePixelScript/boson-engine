@@ -7,9 +7,10 @@ Assessing chess engine strength improvements requires rigorous statistical metho
 Milestone $\Omega$ Module $\Omega$.5 establishes Boson's **Strength & Elo Validation Harness** (`MatchRunner`, `Statistics`, `OpeningBook`, `StrengthReporter`, and `StrengthTypes`). The subsystem adheres to the following core architectural directives:
 
 1. **Protocol-Pure Engine Isolation**: Engines communicate strictly across the Universal Chess Interface (UCI) boundary (`ucinewgame`, `position startpos moves ...`, `go movetime <ms>`, `bestmove <move>`). No internal board state or search state is shared across engine instances.
-2. **Score-First Confidence Bounds**: Confidence intervals are computed directly on empirical scoring probability $p$ with continuity clamping $\varepsilon = \frac{1}{2N}$, then transformed non-linearly via the logistic function to yield asymmetric, statistically valid Elo bounds.
+2. **Wilson-Style Confidence Bounds with Numerical Domain Separation**: Confidence intervals are computed as a **Wilson-style interval applied to the empirical game-score statistic** (not an exact multinomial confidence interval). The system enforces an explicit separation between the raw statistical Wilson interval and the numerical $\varepsilon = \frac{1}{2N}$ domain guard required for the logistic Elo transform.
 3. **Sequential Testing (SPRT)**: Wald Sequential Probability Ratio Testing enables rapid hypothesis acceptance ($H_1: \Delta\text{Elo} \ge +10$) or rejection ($H_0: \Delta\text{Elo} \le 0$) with bounded type I/II error rates ($\alpha = 0.05, \beta = 0.05$).
 4. **Color-Symmetric Paired Openings**: Games are scheduled in 2-game pairs with reversed colors on identical opening books, neutralizing first-move advantage.
+5. **Infrastructure / Protocol Smoke Testing**: Fast 2-game matches (such as Gate $\Omega$.5-A) serve strictly as an **Infrastructure/Protocol Smoke Test** to verify UCI interchange, time/depth controls, and adjudication integrity—they do not constitute engine strength progression claims, which require large-sample SPRT matches.
 
 ---
 
@@ -24,32 +25,50 @@ Given $W$ wins, $D$ draws, and $L$ losses across $N = W + D + L$ completed games
 
 2. **Sample Variance ($\sigma^2$)**:
    $$\sigma^2 = \frac{W(1 - p)^2 + D(0.5 - p)^2 + L(0 - p)^2}{N - 1} \quad (\text{for } N > 1)$$
-   For $N \le 1$, $\sigma^2 = 0.0$.
+   For $N \le 1$, $\sigma^2 = 0.0$ to guard against division-by-zero.
 
 3. **Standard Error ($SE$)**:
    $$SE = \sqrt{\frac{\sigma^2}{N}}$$
 
-### 2.2 Score Confidence Intervals with Continuity Clamping
+### 2.2 Analytical Wilson-Style Score Interval
 
-To prevent invalid intervals or infinite bounds when $p = 0.0$ or $p = 1.0$, a continuity clipping bound $\varepsilon$ is applied:
-$$\varepsilon = \frac{1}{2N}$$
+To guarantee non-collapsing, statistically sound intervals in extreme score regimes ($p \to 0$ or $p \to 1$, where naive sample variance collapses to $\sigma^2 = 0$), the score interval is formulated as a **Wilson-style interval applied to the empirical game-score statistic** $p$ (rather than an exact multinomial interval):
 
-The 95% two-sided normal confidence interval for score $p$ is computed directly in score-space and clamped to $[\varepsilon, 1 - \varepsilon]$:
-$$p_{\text{low}} = \text{clamp}(p - 1.96 \cdot SE, \, \varepsilon, \, 1.0 - \varepsilon)$$
-$$p_{\text{high}} = \text{clamp}(p + 1.96 \cdot SE, \, \varepsilon, \, 1.0 - \varepsilon)$$
+For a two-sided 95% confidence level ($z = 1.959963984540054$):
+$$\text{denominator} = 1.0 + \frac{z^2}{N}$$
+$$\text{center} = \frac{p + \frac{z^2}{2N}}{\text{denominator}}$$
+$$\text{halfWidth} = \frac{z \cdot \sqrt{\frac{p(1 - p)}{N} + \frac{z^2}{4N^2}}}{\text{denominator}}$$
+$$\text{rawWilsonLower} = \max\left(0.0, \, \text{center} - \text{halfWidth}\right)$$
+$$\text{rawWilsonUpper} = \min\left(1.0, \, \text{center} + \text{halfWidth}\right)$$
 
-### 2.3 Non-Linear Logistic Elo Mapping
+### 2.3 Numerical Domain Guard for Logistic Transform (Decoupled Epsilon)
 
-The Elo rating difference $\Delta\text{Elo}$ is defined by the standard logistic distribution:
-$$\Delta\text{Elo}(p) = 400 \cdot \log_{10}\left(\frac{p}{1 - p}\right)$$
+The empirical confidence interval (Wilson Score) and the numerical domain guard (`kLogisticEpsilon = 1e-6`) are **separate mathematical concepts**:
+1. **Statistical Uncertainty Interval**: The Wilson score interval $[\text{rawWilsonLower}, \text{rawWilsonUpper}]$ directly models the physical observation uncertainty of binomial scoring over sample size $N$. It remains strictly uncorrupted.
+2. **Numerical Domain Guard**: The logistic transformation $\Delta\text{Elo}(p) = 400 \cdot \log_{10}\left(\frac{p}{1 - p}\right)$ has asymptotes at $p = 0.0$ ($-\infty$) and $p = 1.0$ ($+\infty$). To evaluate finite logarithms without floating-point exception or NaN, probabilities are clamped to the open interval $(\varepsilon_{\text{logistic}}, 1 - \varepsilon_{\text{logistic}})$.
 
-The score bounds are mapped through this function:
-$$\text{Elo}_{\text{low}} = \Delta\text{Elo}(p_{\text{low}})$$
-$$\text{Elo}_{\text{high}} = \Delta\text{Elo}(p_{\text{high}})$$
+A naive sample-dependent guard $\varepsilon = \frac{1}{2N}$ artificially corrupts statistical behavior at small sample sizes: when $N = 1$, $\varepsilon = \frac{1}{2(1)} = 0.5$, which collapses the domain guard $[\varepsilon, 1 - \varepsilon]$ to the single point $[0.5, 0.5]$, extinguishing the wide uncertainty interval of a 1-game sample.
 
-This produces asymmetric confidence intervals that reflect the greater statistical uncertainty required to shift ratings near the boundaries.
+To preserve proper uncertainty bounds across all sample sizes, Boson decouples the numerical domain guard from $N$ using a fixed constant:
+$$\varepsilon_{\text{logistic}} = 10^{-6} \quad (\texttt{kLogisticEpsilon})$$
+$$\text{eloScoreLower} = \text{clamp}\left(\text{rawWilsonLower}, \, \varepsilon_{\text{logistic}}, \, 1.0 - \varepsilon_{\text{logistic}}\right)$$
+$$\text{eloScoreUpper} = \text{clamp}\left(\text{rawWilsonUpper}, \, \varepsilon_{\text{logistic}}, \, 1.0 - \varepsilon_{\text{logistic}}\right)$$
+$$p_{\text{clamped}} = \text{clamp}\left(p, \, \varepsilon_{\text{logistic}}, \, 1.0 - \varepsilon_{\text{logistic}}\right)$$
 
-### 2.4 Sequential Probability Ratio Test (SPRT)
+This guarantees that:
+- For $N = 1$, the wide raw Wilson intervals are preserved under the logistic mapping as $\text{CI}(1\text{W}) = [-233.80, +2400.00]$ and $\text{CI}(1\text{L}) = [-2400.00, +233.80]$, such that $\text{CI}(1\text{W}) = -\text{CI}(1\text{L})$ (interval negation reverses and negates endpoints), accurately reflecting high statistical uncertainty with non-zero width ($> 2600$ Elo).
+- For $N = 100$ extreme scores ($100\text{W}/0\text{L}$ or $0\text{W}/100\text{L}$), wide, non-zero width intervals ($1833.80$ Elo) and exact reflection symmetry are preserved without NaN or infinite values.
+
+### 2.4 Non-Linear Logistic Elo Mapping
+
+The Elo rating difference $\Delta\text{Elo}$ and its confidence bounds are computed from the guarded endpoints:
+$$\Delta\text{Elo} = 400.0 \cdot \log_{10}\left(\frac{p_{\text{clamped}}}{1 - p_{\text{clamped}}}\right)$$
+$$\text{Elo}_{\text{Lower}} = 400.0 \cdot \log_{10}\left(\frac{\text{eloScoreLower}}{1 - \text{eloScoreLower}}\right)$$
+$$\text{Elo}_{\text{Upper}} = 400.0 \cdot \log_{10}\left(\frac{\text{eloScoreUpper}}{1 - \text{eloScoreUpper}}\right)$$
+
+All outputs are rigorously verified via `assert(std::isfinite(...))` ensuring zero occurrences of NaN, $+\infty$, or $-\infty$.
+
+### 2.5 Sequential Probability Ratio Test (SPRT)
 
 The harness tests composite hypotheses for engine Elo progression:
 - $H_0: \Delta\text{Elo} \le \text{Elo}_0$ (default $0.0 \implies p_0 = 0.5$)
@@ -239,7 +258,7 @@ Structured results can be parsed by automated CI/CD pipelines or stored in histo
 
 | Gate ID | Subsystem | Criteria | Status |
 |---|---|---|---|
-| **Gate $\Omega$.5-A** | Match Runner | Smoke test executes 2 color-reversed paired games without fault | **PASSED** |
+| **Gate $\Omega$.5-A** | Match Runner | Infrastructure/Protocol Smoke Test (2 color-reversed paired games without fault; no engine strength claim) | **PASSED** |
 | **Gate $\Omega$.5-B** | Protocol Adjudication | 100% legal moves verified; valid terminal adjudication | **PASSED** |
 | **Gate $\Omega$.5-C** | Process Isolation | Zero exceptions, memory corruption, or UCI token drift | **PASSED** |
 | **Gate $\Omega$.5-D** | Statistical Engine | Exact score arithmetic, variance, CI bounds, and SPRT transitions | **PASSED** |

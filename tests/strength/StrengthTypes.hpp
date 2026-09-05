@@ -111,6 +111,19 @@ struct SPRTResult {
     SPRTDecision decision{SPRTDecision::Continue};
 };
 
+struct ConfidenceInterval {
+    double observedScore{0.5};
+    double rawWilsonLower{0.0};
+    double rawWilsonUpper{1.0};
+    double eloScoreLower{0.0};
+    double eloScoreUpper{1.0};
+    double deltaElo{0.0};
+    double eloLower{0.0};
+    double eloUpper{0.0};
+};
+
+using StatisticalEvaluation = ConfidenceInterval;
+
 struct MatchStatistics {
     uint32_t wins{0};
     uint32_t draws{0};
@@ -121,12 +134,24 @@ struct MatchStatistics {
     double scorePercentage{50.0};
     double sampleVariance{0.0};
     double standardError{0.0};
+
+    // Statistical output container fields
+    double observedScore{0.5};
+    double rawWilsonLower{0.0};
+    double rawWilsonUpper{1.0};
+    double eloScoreLower{0.0};
+    double eloScoreUpper{1.0};
+    double deltaElo{0.0};
+    double eloLower{0.0};
+    double eloUpper{0.0};
+
+    // Aliases for compatibility
     double scoreLow{0.0};
     double scoreHigh{1.0};
-
-    double deltaElo{0.0};
     double eloLow{0.0};
     double eloHigh{0.0};
+
+    ConfidenceInterval ci{};
 
     SPRTResult sprt{};
 };
