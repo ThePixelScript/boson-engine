@@ -26,6 +26,9 @@
 #include "system/EngineInfo.hpp"
 #include "tactical/TacticalSuite.hpp"
 #include "tactical/TacticalSuite.cpp"
+#include "integrity/PositionFingerprint.hpp"
+#include "integrity/IntegritySuite.hpp"
+#include "integrity/IntegritySuite.cpp"
 
 namespace Boson {
 
@@ -3612,6 +3615,10 @@ bool runMilestoneOmegaPhase2TacticalTests() {
     return TacticalRegressionRunner::runMilestoneOmegaPhase2TacticalTests();
 }
 
+bool runMilestoneOmegaPhase3IntegrityTests() {
+    return IntegrityRunner::runMilestoneOmegaPhase3IntegrityTests();
+}
+
 void runDiagnostics() {
     std::cout << "\n==================================================\n";
     std::cout << "===   EXECUTING BOSON SUBSYSTEM DIAGNOSTICS   ===\n";
@@ -3676,6 +3683,7 @@ int main() {
     bool m6Module610Success = Boson::runMilestone6Module610Tests();
     bool omegaPhase1Success = Boson::runMilestoneOmegaPhase1Tests();
     bool omegaPhase2Success = Boson::runMilestoneOmegaPhase2TacticalTests();
+    bool omegaPhase3Success = Boson::runMilestoneOmegaPhase3IntegrityTests();
     Boson::runDiagnostics();
-    return (m1Phase2Success && m1Module13Success && m2PhasesBCSuccess && m2PerftSuccess && phaseYZSuccess && phaseAASuccess && phaseABSuccess && m6Phase12Success && m6Module63Success && m6Module64Success && m6Module65Success && m6Module66Success && m6Module67Success && m6Module68Success && m6Module69Success && m6Module610Success && omegaPhase1Success && omegaPhase2Success) ? 0 : 1;
+    return (m1Phase2Success && m1Module13Success && m2PhasesBCSuccess && m2PerftSuccess && phaseYZSuccess && phaseAASuccess && phaseABSuccess && m6Phase12Success && m6Module63Success && m6Module64Success && m6Module65Success && m6Module66Success && m6Module67Success && m6Module68Success && m6Module69Success && m6Module610Success && omegaPhase1Success && omegaPhase2Success && omegaPhase3Success) ? 0 : 1;
 }
