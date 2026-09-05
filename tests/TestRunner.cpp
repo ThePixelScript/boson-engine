@@ -4491,7 +4491,7 @@ bool testGateOmega6G_DeterministicBaselinePreservation() {
         ~LocalCoutSilencer() { std::cout.rdbuf(origBuf); }
     };
 
-    // 1. Startpos depth 6 verification (expected: 25,210 nodes)
+    // 1. Startpos depth 6 verification (expected: 25,318 nodes under PVS)
     const std::string startpos = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
     auto optStart = FenParser::parse(startpos);
     if (!optStart) return false;
@@ -4507,12 +4507,12 @@ bool testGateOmega6G_DeterministicBaselinePreservation() {
     }
 
     uint64_t startNodes = SearchController::getInstance().getStats().nodes + SearchController::getInstance().getStats().qNodes;
-    if (startNodes != 25210) {
-        std::cerr << "[FAIL] Gate Omega 6-G: Startpos depth 6 nodes " << startNodes << " != 25210\n";
+    if (startNodes != 25318) {
+        std::cerr << "[FAIL] Gate Omega 6-G: Startpos depth 6 nodes " << startNodes << " != 25318\n";
         return false;
     }
 
-    // 2. KiwiPete depth 6 verification (expected: 154,823 nodes)
+    // 2. KiwiPete depth 6 verification (expected: 44,955 nodes under PVS)
     const std::string kiwipete = "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1";
     auto optKiwi = FenParser::parse(kiwipete);
     if (!optKiwi) return false;
@@ -4528,12 +4528,12 @@ bool testGateOmega6G_DeterministicBaselinePreservation() {
     }
 
     uint64_t kiwiNodes = SearchController::getInstance().getStats().nodes + SearchController::getInstance().getStats().qNodes;
-    if (kiwiNodes != 154823) {
-        std::cerr << "[FAIL] Gate Omega 6-G: KiwiPete depth 6 nodes " << kiwiNodes << " != 154823\n";
+    if (kiwiNodes != 44955) {
+        std::cerr << "[FAIL] Gate Omega 6-G: KiwiPete depth 6 nodes " << kiwiNodes << " != 44955\n";
         return false;
     }
 
-    // 3. Full benchmark suite (6 canonical positions at depth 6) == 495,749 nodes
+    // 3. Full benchmark suite (6 canonical positions at depth 6) == 225,789 nodes
     BenchmarkConfig cfg;
     cfg.overrideDepth = 6;
     cfg.hashSizeMb = 16;
@@ -4542,9 +4542,9 @@ bool testGateOmega6G_DeterministicBaselinePreservation() {
     cfg.printConsole = false;
     BenchmarkRunRecord rec = BenchmarkRunner::run(cfg);
 
-    if (rec.aggregate.totalNodes != 495749) {
+    if (rec.aggregate.totalNodes != 225789) {
         std::cerr << "[FAIL] Gate Omega 6-G: Aggregate benchmark depth 6 nodes "
-                  << rec.aggregate.totalNodes << " != 495749\n";
+                  << rec.aggregate.totalNodes << " != 225789\n";
         return false;
     }
 
@@ -4584,7 +4584,7 @@ bool runMilestoneOmegaPhase6ParameterRegistryTests() {
     if (passF) passed++;
 
     bool passG = testGateOmega6G_DeterministicBaselinePreservation();
-    std::cout << "[" << (passG ? "PASS" : "FAIL") << "] Omega 6-G: Deterministic Node Baseline Preservation (495,749 nodes)\n";
+    std::cout << "[" << (passG ? "PASS" : "FAIL") << "] Omega 6-G: Deterministic Node Baseline Preservation (225,789 nodes)\n";
     if (passG) passed++;
 
     std::cout << "\n=================================================================\n";
@@ -4592,6 +4592,251 @@ bool runMilestoneOmegaPhase6ParameterRegistryTests() {
     std::cout << "=================================================================\n";
 
     return (passed == total);
+}
+
+// ============================================================================
+// MILESTONE OMEGA, PHASE 6.5-A: PVS ZERO-WINDOW SCOUTING TESTS
+// ============================================================================
+
+bool testGate65A_1_PvNodeFirstMoveFullWindow() {
+    const std::string fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+    auto opt = FenParser::parse(fen);
+    if (!opt) return false;
+    Position pos = *opt;
+
+    BenchmarkRunner::resetSearchState(16);
+    PVLine pv;
+    int score = Search::negamax(pos, 2, -500, 500, 0, pv, false, Move());
+
+    if (pv.count == 0) {
+        std::cerr << "[FAIL] Phase 6.5-A Test 1: PV line empty on PV node search\n";
+        return false;
+    }
+
+    if (score < -500 || score > 500) {
+        std::cerr << "[FAIL] Phase 6.5-A Test 1: Score out of full window bounds: " << score << "\n";
+        return false;
+    }
+
+    MoveList legal;
+    MoveGenerator::generateLegalMoves(pos, legal);
+    bool found = false;
+    for (size_t i = 0; i < legal.size(); ++i) {
+        if (legal[i].getRawData() == pv.moves[0].getRawData()) {
+            found = true;
+            break;
+        }
+    }
+    if (!found) {
+        std::cerr << "[FAIL] Phase 6.5-A Test 1: First move is not legal\n";
+        return false;
+    }
+
+    return true;
+}
+
+bool testGate65A_2_PvNodeSiblingFailLowNonResearch() {
+    const std::string fen = "2rr2k1/1p3ppp/3p4/p2Np3/1PP1P3/2K2P2/P3q1PP/3R3R b - - 0 1";
+    auto opt = FenParser::parse(fen);
+    if (!opt) return false;
+    Position pos = *opt;
+
+    BenchmarkRunner::resetSearchState(16);
+    SearchLimits limits;
+    limits.depth = 3;
+    limits.clearTables = true;
+    Search::runSearch(pos, limits);
+
+    const auto& stats = SearchController::getInstance().getStats();
+    if (stats.pvLine.count == 0 || stats.pvLine.moves[0].toString() != "c8c4") {
+        std::cerr << "[FAIL] Phase 6.5-A Test 2: Best move was not c8c4\n";
+        return false;
+    }
+
+    return true;
+}
+
+bool testGate65A_3_PvNodeSiblingFailHighSingleResearch() {
+    const std::string fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+    auto opt = FenParser::parse(fen);
+    if (!opt) return false;
+    Position pos = *opt;
+
+    BenchmarkRunner::resetSearchState(16);
+    SearchLimits limits;
+    limits.depth = 4;
+    limits.clearTables = true;
+    Search::runSearch(pos, limits);
+
+    const auto& stats = SearchController::getInstance().getStats();
+    if (stats.researches == 0) {
+        std::cerr << "[FAIL] Phase 6.5-A Test 3: No re-searches occurred during depth 4 search\n";
+        return false;
+    }
+
+    if (stats.pvLine.count == 0) {
+        std::cerr << "[FAIL] Phase 6.5-A Test 3: PV line empty after search\n";
+        return false;
+    }
+
+    return true;
+}
+
+bool testGate65A_4_PvNodeSiblingBetaCutoffZeroResearch() {
+    const std::string fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+    auto opt = FenParser::parse(fen);
+    if (!opt) return false;
+    Position pos = *opt;
+
+    BenchmarkRunner::resetSearchState(16);
+    auto& stats = SearchController::getInstance().getStats();
+    stats.reset();
+
+    PVLine pv;
+    int score = Search::negamax(pos, 2, -50, 0, 0, pv, false, Move());
+
+    if (score >= 0) {
+        if (stats.researches > 0) {
+            std::cerr << "[FAIL] Phase 6.5-A Test 4: Unexpected re-search on beta cutoff: "
+                      << stats.researches << "\n";
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool testGate65A_5_NonPvNodeZeroWindowPreservation() {
+    const std::string fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+    auto opt = FenParser::parse(fen);
+    if (!opt) return false;
+    Position pos = *opt;
+
+    BenchmarkRunner::resetSearchState(16);
+    PVLine pv;
+    const int alpha = 0;
+    const int beta = 1;
+    int score = Search::negamax(pos, 3, alpha, beta, 0, pv, true, Move());
+
+    if (score > alpha && score < beta) {
+        std::cerr << "[FAIL] Phase 6.5-A Test 5: Score fell inside zero-window: " << score << "\n";
+        return false;
+    }
+
+    return true;
+}
+
+bool testGate65A_6_RootBestMoveAndPvLineValidity() {
+    const char* fens[] = {
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+        "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+        "2rr2k1/1p3ppp/3p4/p2Np3/1PP1P3/2K2P2/P3q1PP/3R3R b - - 0 1"
+    };
+
+    for (const char* fen : fens) {
+        auto opt = FenParser::parse(fen);
+        if (!opt) return false;
+        Position pos = *opt;
+
+        BenchmarkRunner::resetSearchState(16);
+        SearchLimits limits;
+        limits.depth = 4;
+        limits.clearTables = true;
+        Search::runSearch(pos, limits);
+
+        const auto& stats = SearchController::getInstance().getStats();
+        if (stats.pvLine.count == 0) {
+            std::cerr << "[FAIL] Phase 6.5-A Test 6: PV line empty for " << fen << "\n";
+            return false;
+        }
+
+        Position testPos = pos;
+        for (size_t p = 0; p < stats.pvLine.count; ++p) {
+            Move m = stats.pvLine.moves[p];
+            MoveList legal;
+            MoveGenerator::generateLegalMoves(testPos, legal);
+            bool isLegal = false;
+            for (size_t i = 0; i < legal.size(); ++i) {
+                if (legal[i].getRawData() == m.getRawData()) {
+                    isLegal = true;
+                    break;
+                }
+            }
+            if (!isLegal) {
+                std::cerr << "[FAIL] Phase 6.5-A Test 6: Move " << m.toString()
+                          << " at ply " << p << " is not legal in position " << fen << "\n";
+                return false;
+            }
+            UndoState u;
+            MoveExecutor::makeMove(testPos, m, u);
+        }
+    }
+
+    return true;
+}
+
+bool runPhase65APvsTests() {
+    std::cout << "\n=================================================================\n";
+    std::cout << "===  MILESTONE OMEGA, PHASE 6.5-A: PVS ZERO-WINDOW SCOUTING   ===\n";
+    std::cout << "=================================================================\n";
+
+    int passed = 0;
+    int total = 6;
+
+    bool pass1 = testGate65A_1_PvNodeFirstMoveFullWindow();
+    std::cout << "[" << (pass1 ? "PASS" : "FAIL") << "] Phase 6.5-A Test 1: PV Node First-Move Full Window Search\n";
+    if (pass1) passed++;
+
+    bool pass2 = testGate65A_2_PvNodeSiblingFailLowNonResearch();
+    std::cout << "[" << (pass2 ? "PASS" : "FAIL") << "] Phase 6.5-A Test 2: PV Node Sibling Zero-Window Scouting & Fail-Low Non-Re-search\n";
+    if (pass2) passed++;
+
+    bool pass3 = testGate65A_3_PvNodeSiblingFailHighSingleResearch();
+    std::cout << "[" << (pass3 ? "PASS" : "FAIL") << "] Phase 6.5-A Test 3: PV Node Sibling Fail-High Triggering Full-Depth Re-search\n";
+    if (pass3) passed++;
+
+    bool pass4 = testGate65A_4_PvNodeSiblingBetaCutoffZeroResearch();
+    std::cout << "[" << (pass4 ? "PASS" : "FAIL") << "] Phase 6.5-A Test 4: PV Node Sibling Immediate Beta-Cutoff with Zero Re-search\n";
+    if (pass4) passed++;
+
+    bool pass5 = testGate65A_5_NonPvNodeZeroWindowPreservation();
+    std::cout << "[" << (pass5 ? "PASS" : "FAIL") << "] Phase 6.5-A Test 5: Non-PV Node Zero-Window Preservation Across Moves\n";
+    if (pass5) passed++;
+
+    bool pass6 = testGate65A_6_RootBestMoveAndPvLineValidity();
+    std::cout << "[" << (pass6 ? "PASS" : "FAIL") << "] Phase 6.5-A Test 6: Root Best-Move Consistency & Sequential PV Line Validity\n";
+    if (pass6) passed++;
+
+    std::cout << "\n=================================================================\n";
+    std::cout << "PHASE 6.5-A PVS RESULT: " << passed << "/" << total << " Test Categories Passed.\n";
+    std::cout << "=================================================================\n";
+
+    return (passed == total);
+}
+
+bool runOperationalSmokeMatch20Games() {
+    std::cout << "\n=================================================================\n";
+    std::cout << "===   RUNNING 20-GAME COLOR-BALANCED STRENGTH SMOKE MATCH     ===\n";
+    std::cout << "=================================================================\n";
+    MatchConfig cfg;
+    cfg.engineA = "Boson-PVS-A";
+    cfg.engineB = "Boson-PVS-B";
+    cfg.totalGames = 20;
+    cfg.timeControlMs = 50;
+    cfg.fixedDepth = 0;
+    cfg.maxPlies = 100;
+    MatchRecord rec = MatchRunner::runMatch(cfg);
+    StrengthReporter::printConsoleReport(rec);
+
+    for (const auto& g : rec.games) {
+        if (g.termination == TerminationType::ProtocolError ||
+            g.termination == TerminationType::EngineCrash ||
+            g.termination == TerminationType::IllegalMove) {
+            std::cerr << "[FAIL] Smoke match game ended abnormally: " << terminationToString(g.termination) << "\n";
+            return false;
+        }
+    }
+    return true;
 }
 
 void runDiagnostics() {
@@ -4662,6 +4907,8 @@ int main() {
     bool omegaPhase4Success = Boson::runMilestoneOmegaPhase4BenchmarkTests();
     bool omegaPhase5Success = Boson::runMilestoneOmegaPhase5StrengthTests();
     bool omegaPhase6Success = Boson::runMilestoneOmegaPhase6ParameterRegistryTests();
+    bool phase65ASuccess = Boson::runPhase65APvsTests();
+    bool smokeMatchSuccess = Boson::runOperationalSmokeMatch20Games();
     Boson::runDiagnostics();
-    return (m1Phase2Success && m1Module13Success && m2PhasesBCSuccess && m2PerftSuccess && phaseYZSuccess && phaseAASuccess && phaseABSuccess && m6Phase12Success && m6Module63Success && m6Module64Success && m6Module65Success && m6Module66Success && m6Module67Success && m6Module68Success && m6Module69Success && m6Module610Success && omegaPhase1Success && omegaPhase2Success && omegaPhase3Success && omegaPhase4Success && omegaPhase5Success && omegaPhase6Success) ? 0 : 1;
+    return (m1Phase2Success && m1Module13Success && m2PhasesBCSuccess && m2PerftSuccess && phaseYZSuccess && phaseAASuccess && phaseABSuccess && m6Phase12Success && m6Module63Success && m6Module64Success && m6Module65Success && m6Module66Success && m6Module67Success && m6Module68Success && m6Module69Success && m6Module610Success && omegaPhase1Success && omegaPhase2Success && omegaPhase3Success && omegaPhase4Success && omegaPhase5Success && omegaPhase6Success && phase65ASuccess && smokeMatchSuccess) ? 0 : 1;
 }

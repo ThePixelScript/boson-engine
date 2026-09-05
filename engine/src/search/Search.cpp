@@ -139,13 +139,13 @@ int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLi
         allowNull = false; 
     }
 
-    int originalAlpha = alpha;
+    const int alphaOrig = alpha;
+    const bool isPvNode = (beta - alpha > 1);
+
     Move ttMove;
     int ttScore = 0;
     int ttDepth = 0;
     TTNodeType ttType = TTNodeType::Exact;
-
-    bool isPvNode = (beta - alpha > 1);
 
     int extensions = 0;
     if (isPvNode && inCheck && ply < 64 && depth >= 2) {
@@ -242,6 +242,7 @@ int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLi
         bool inEnemyKingZone = (enemyKingSq != Square::None) &&
                                ((MoveGenerator::getKingAttacks(enemyKingSq) & targetBit) != 0);
 
+        const int moveCount = static_cast<int>(i);
         UndoState undo;
         MoveExecutor::makeMove(pos, legalMoves[i], undo);
         movesSearched++;
@@ -249,28 +250,30 @@ int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLi
         bool givesCheck = MoveGenerator::inCheck(pos, pos.getSideToMove());
 
         int searchedDepth = depth - 1 + extensions;
-        int score = -INF;
-        int reduction = 0;
+        int r = 0;
 
         // LMR Eligibility Rules:
         // 1. Move is quiet (not a capture, not an en-passant, not a promotion).
         // 2. Side to move is not in check (!inCheck).
         // 3. Move does not give check (!givesCheck).
-        // 4. Sufficient search depth (searchedDepth >= 3).
-        // 5. Move index is late (movesSearched >= 4, i.e. not an early candidate).
+        // 4. Sufficient search depth (searchedDepth >= lmrMinDepth).
+        // 5. Move index is late (moveCount >= lmrMinMoveCount, i.e. not an early candidate).
         // 6. Move is not a TT PV move (!isPvMove).
         // 7. Move does not attack the enemy king zone (!inEnemyKingZone).
+        // 8. Sibling move (moveCount > 0).
         const bool isPvMove = (ttMove.getRawData() != 0 && m.getRawData() == ttMove.getRawData());
-        const bool isLateMove = (movesSearched >= params.search.lmrMinMoveCount);
+        const bool isLateMove = (moveCount >= params.search.lmrMinMoveCount);
 
-        if (params.debug.enableLMR && searchedDepth >= params.search.lmrMinDepth && isLateMove && !isPvMove && !inCheck && !isCaptureMove && !isPromotionMove && !givesCheck && !inEnemyKingZone) {
-            reduction = LMRPolicy::getReduction(searchedDepth, movesSearched);
+        if (params.debug.enableLMR && moveCount > 0 && searchedDepth >= params.search.lmrMinDepth &&
+            isLateMove && !isPvMove && !inCheck && !isCaptureMove && !isPromotionMove && !givesCheck && !inEnemyKingZone) {
+            
+            r = LMRPolicy::getReduction(searchedDepth, movesSearched);
 
             // Killer Move discount: Proven refutations receive reduced reduction
             const bool isKiller = (ply < 64) && (s_killerMoves[ply][0].getRawData() == m.getRawData() ||
                                                  s_killerMoves[ply][1].getRawData() == m.getRawData());
             if (isKiller) {
-                reduction = std::max(0, reduction - 1);
+                r = std::max(0, r - 1);
             }
             
             // History Discount: High-history moves indicate positional refutations
@@ -280,34 +283,63 @@ int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLi
                     size_t pIdx = p;
                     size_t toIdx = static_cast<size_t>(m.getToSquare());
                     if (s_historyTable[pIdx][toIdx] > 4000) {
-                        reduction = std::max(0, reduction - 1);
+                        r = std::max(0, r - 1);
                     }
                     break;
                 }
             }
 
             if (inEnemyKingZone) {
-                reduction = 0;
+                r = 0;
             }
 
-            if (reduction > 0) {
-                stats.lmrAttempts++;
-                stats.lmrReducedNodes++;
-                stats.reducedNodes++;
-                score = -negamax(pos, searchedDepth - reduction, -alpha - 1, -alpha, ply + 1, childPv, true, m);
-                if (score > alpha) {
-                    stats.lmrResearches++;
+            r = std::clamp(r, 0, searchedDepth - 1);
+        }
+
+        if (r > 0) {
+            stats.lmrAttempts++;
+            stats.lmrReducedNodes++;
+            stats.reducedNodes++;
+        }
+
+        // PVS Scouting / Search Dispatch:
+        int score = 0;
+        if (isPvNode) {
+            if (moveCount == 0) {
+                // PV Node, First Move: Full-window search
+                score = -negamax(pos, searchedDepth, -beta, -alpha, ply + 1, childPv, false, m);
+            } else {
+                // PV Node, Sibling Move: Zero-window scout with LMR reduction
+                score = -negamax(pos, searchedDepth - r, -alpha - 1, -alpha, ply + 1, childPv, true, m);
+
+                // Re-search condition: scout failed high (> alpha) and did not cause a beta cutoff (< beta)
+                if (score > alpha && score < beta) {
+                    if (r > 0) {
+                        stats.lmrResearches++;
+                    }
                     stats.researches++;
-                    score = -negamax(pos, searchedDepth, -beta, -alpha, ply + 1, childPv, true, m);
-                    if (score > alpha) {
+
+                    // Full-depth, full-window re-search (zero reduction)
+                    score = -negamax(pos, searchedDepth, -beta, -alpha, ply + 1, childPv, false, m);
+
+                    if (score > alpha && r > 0) {
                         stats.successfulResearches++;
                     }
                 }
             }
-        }
+        } else {
+            // Non-PV / Scout Node: Every move is searched with the incoming zero-window [-beta, -alpha]
+            score = -negamax(pos, searchedDepth - r, -beta, -alpha, ply + 1, childPv, true, m);
 
-        if (score == -INF) {
-            score = -negamax(pos, searchedDepth, -beta, -alpha, ply + 1, childPv, true, m);
+            // If LMR reduction was applied and it failed high over alpha, re-search at full depth with same zero-window
+            if (r > 0 && score > alpha) {
+                stats.lmrResearches++;
+                stats.researches++;
+                score = -negamax(pos, searchedDepth, -beta, -alpha, ply + 1, childPv, true, m);
+                if (score > alpha) {
+                    stats.successfulResearches++;
+                }
+            }
         }
 
         MoveExecutor::undoMove(pos, legalMoves[i], undo);
@@ -390,7 +422,7 @@ int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLi
     if (controller.shouldStop()) return 0;
 
     TTNodeType storeType = TTNodeType::Exact;
-    if (bestScore <= originalAlpha)   storeType = TTNodeType::UpperBound;
+    if (bestScore <= alphaOrig)      storeType = TTNodeType::UpperBound;
     else if (bestScore >= beta)      storeType = TTNodeType::LowerBound;
 
     if (params.debug.enableCorrHist && !inCheck && depth >= 2 && std::abs(bestScore) < MATE - 100) {
