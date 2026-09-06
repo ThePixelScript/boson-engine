@@ -31,6 +31,8 @@ public:
 
     // Core movement generation loops
     static void generateLegalMoves(const Position& pos, MoveList& legalMoves) noexcept;
+    static void generateLegalCaptures(const Position& pos, MoveList& captures) noexcept;
+    static void generateLegalQuiets(const Position& pos, MoveList& quiets) noexcept;
     static void generateTacticalMoves(const Position& pos, MoveList& moves) noexcept;
 
     static void generateKnightMoves(const Position& pos, MoveList& moves) noexcept;

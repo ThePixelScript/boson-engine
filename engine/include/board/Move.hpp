@@ -24,6 +24,8 @@ public:
     // Default constructor (Creates a null move)
     constexpr Move() noexcept : m_data(0) {}
 
+    [[nodiscard]] static constexpr Move none() noexcept { return Move(); }
+
     // Packed Constructor: Changed cast to uint32_t to fully accommodate 18 bits safely
     constexpr Move(Square from, Square to, Flags flags = Flags::None, PromotionPiece promo = PromotionPiece::None) noexcept 
         : m_data(static_cast<uint32_t>(from) | 
@@ -48,6 +50,10 @@ public:
     // Add this inside the 'public' section of your Move class
     constexpr bool operator==(const Move& rhs) const noexcept {
         return m_data == rhs.m_data;
+    }
+
+    constexpr bool operator!=(const Move& rhs) const noexcept {
+        return m_data != rhs.m_data;
     }
 
     // Add this as well for debugging and DIVIDE output

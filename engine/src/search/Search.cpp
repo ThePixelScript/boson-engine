@@ -2,6 +2,7 @@
 #include "search/SearchController.hpp"
 #include "search/LMRPolicy.hpp"
 #include "search/MoveOrderer.hpp"
+#include "search/MovePicker.hpp"
 #include "search/see/SEE.hpp"
 #include "evaluation/Evaluator.hpp"
 #include "board/MoveGenerator.hpp"
@@ -80,39 +81,40 @@ int Search::quiescence(Position& pos, int alpha, int beta, int ply) noexcept {
         if (standPat > alpha) alpha = standPat;
     }
 
-    MoveList moves;
     if (inCheck) {
+        MoveList moves;
         MoveGenerator::generateLegalMoves(pos, moves);
         if (moves.size() == 0) {
             return -MATE + ply;
         }
+        MoveOrderer::scoreAndSortTacticalMoves(pos, moves);
+        for (size_t i = 0; i < moves.size(); ++i) {
+            UndoState undo;
+            MoveExecutor::makeMove(pos, moves[i], undo);
+            int moveScore = -quiescence(pos, -beta, -alpha, ply + 1);
+            MoveExecutor::undoMove(pos, moves[i], undo);
+
+            if (controller.shouldStop()) return 0;
+            if (moveScore >= beta) return beta;
+            if (moveScore > alpha) alpha = moveScore;
+        }
+        return alpha;
     } else {
-        MoveGenerator::generateTacticalMoves(pos, moves);
-        if (moves.size() == 0) {
-            return alpha;
+        SearchContext searchContext(ply, Move::none());
+        MovePicker picker(pos, Move::none(), searchContext, PickerMode::Quiescence);
+        Move move;
+        while ((move = picker.nextMove()) != Move::none()) {
+            UndoState undo;
+            MoveExecutor::makeMove(pos, move, undo);
+            int moveScore = -quiescence(pos, -beta, -alpha, ply + 1);
+            MoveExecutor::undoMove(pos, move, undo);
+
+            if (controller.shouldStop()) return 0;
+            if (moveScore >= beta) return beta;
+            if (moveScore > alpha) alpha = moveScore;
         }
+        return alpha;
     }
-
-    MoveOrderer::scoreAndSortTacticalMoves(pos, moves);
-
-    for (size_t i = 0; i < moves.size(); ++i) {
-        if (!inCheck && !moves[i].isPromotion()) {
-            if (SEE::evaluate(pos, moves[i].getFromSquare(), moves[i].getToSquare()) < 0) {
-                continue;
-            }
-        }
-
-        UndoState undo;
-        MoveExecutor::makeMove(pos, moves[i], undo);
-        int moveScore = -quiescence(pos, -beta, -alpha, ply + 1);
-        MoveExecutor::undoMove(pos, moves[i], undo);
-
-        if (controller.shouldStop()) return 0;
-        if (moveScore >= beta) return beta;
-        if (moveScore > alpha) alpha = moveScore;
-    }
-
-    return alpha;
 }
 
 int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLine& pv, bool allowNull, Move prevMove) noexcept {
@@ -213,24 +215,17 @@ int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLi
         }
     }
 
-    MoveList legalMoves;
-    MoveGenerator::generateLegalMoves(pos, legalMoves);
-
-    if (legalMoves.size() == 0) {
-        if (inCheck) return -MATE + ply; 
-        return 0; 
-    }
-
-    MoveOrderer::scoreAndSortMoves(pos, legalMoves, ttMove, s_killerMoves, s_historyTable, ply, prevMove);
+    SearchContext searchContext(ply, prevMove, &s_killerMoves, &s_historyTable);
+    MovePicker picker(pos, ttMove, searchContext, PickerMode::Normal);
 
     int bestScore = -INF;
     Move bestMove;
     PVLine childPv;
     int movesSearched = 0;
+    int moveCount = 0;
+    Move m;
 
-    for (size_t i = 0; i < legalMoves.size(); ++i) {
-        const Move& m = legalMoves[i];
-
+    while ((m = picker.nextMove()) != Move::none()) {
         const Bitboard targetBit = Bitboards::getSquareBit(m.getToSquare());
         const bool isCaptureMove = (pos.getTotalOccupancy() & targetBit) != 0 ||
                                    m.isEnPassant() ||
@@ -242,9 +237,8 @@ int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLi
         bool inEnemyKingZone = (enemyKingSq != Square::None) &&
                                ((MoveGenerator::getKingAttacks(enemyKingSq) & targetBit) != 0);
 
-        const int moveCount = static_cast<int>(i);
         UndoState undo;
-        MoveExecutor::makeMove(pos, legalMoves[i], undo);
+        MoveExecutor::makeMove(pos, m, undo);
         movesSearched++;
 
         bool givesCheck = MoveGenerator::inCheck(pos, pos.getSideToMove());
@@ -253,14 +247,6 @@ int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLi
         int r = 0;
 
         // LMR Eligibility Rules:
-        // 1. Move is quiet (not a capture, not an en-passant, not a promotion).
-        // 2. Side to move is not in check (!inCheck).
-        // 3. Move does not give check (!givesCheck).
-        // 4. Sufficient search depth (searchedDepth >= lmrMinDepth).
-        // 5. Move index is late (moveCount >= lmrMinMoveCount, i.e. not an early candidate).
-        // 6. Move is not a TT PV move (!isPvMove).
-        // 7. Move does not attack the enemy king zone (!inEnemyKingZone).
-        // 8. Sibling move (moveCount > 0).
         const bool isPvMove = (ttMove.getRawData() != 0 && m.getRawData() == ttMove.getRawData());
         const bool isLateMove = (moveCount >= params.search.lmrMinMoveCount);
 
@@ -342,19 +328,19 @@ int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLi
             }
         }
 
-        MoveExecutor::undoMove(pos, legalMoves[i], undo);
+        MoveExecutor::undoMove(pos, m, undo);
 
         if (controller.shouldStop()) return 0;
 
         if (score > bestScore) {
             bestScore = score;
-            bestMove = legalMoves[i];
+            bestMove = m;
         }
         
         if (score > alpha) {
             alpha = score;
             
-            pv.moves[0] = legalMoves[i];
+            pv.moves[0] = m;
             for (size_t j = 0; j < childPv.count; ++j) {
                 if (j + 1 < 64) pv.moves[j + 1] = childPv.moves[j];
             }
@@ -417,6 +403,15 @@ int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLi
             }
             break; 
         }
+
+        moveCount++;
+    }
+
+    if (controller.shouldStop()) return 0;
+
+    if (movesSearched == 0) {
+        if (inCheck) return -MATE + ply; 
+        return 0; 
     }
 
     if (controller.shouldStop()) return 0;

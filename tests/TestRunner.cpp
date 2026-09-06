@@ -18,6 +18,7 @@
 #include "search/Search.hpp"
 #include "search/SearchController.hpp"
 #include "search/MoveOrderer.hpp"
+#include "search/MovePicker.hpp"
 #include "search/see/SEE.hpp"
 #include "search/LMR.hpp"
 #include "evaluation/Evaluator.hpp"
@@ -4491,7 +4492,7 @@ bool testGateOmega6G_DeterministicBaselinePreservation() {
         ~LocalCoutSilencer() { std::cout.rdbuf(origBuf); }
     };
 
-    // 1. Startpos depth 6 verification (expected: 25,318 nodes under PVS)
+    // 1. Startpos depth 6 verification (expected: 26,389 nodes under Phase 6.5-B MovePicker)
     const std::string startpos = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
     auto optStart = FenParser::parse(startpos);
     if (!optStart) return false;
@@ -4507,12 +4508,12 @@ bool testGateOmega6G_DeterministicBaselinePreservation() {
     }
 
     uint64_t startNodes = SearchController::getInstance().getStats().nodes + SearchController::getInstance().getStats().qNodes;
-    if (startNodes != 25318) {
-        std::cerr << "[FAIL] Gate Omega 6-G: Startpos depth 6 nodes " << startNodes << " != 25318\n";
+    if (startNodes != 26389) {
+        std::cerr << "[FAIL] Gate Omega 6-G: Startpos depth 6 nodes " << startNodes << " != 26389\n";
         return false;
     }
 
-    // 2. KiwiPete depth 6 verification (expected: 44,955 nodes under PVS)
+    // 2. KiwiPete depth 6 verification (expected: 37,515 nodes under Phase 6.5-B MovePicker)
     const std::string kiwipete = "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1";
     auto optKiwi = FenParser::parse(kiwipete);
     if (!optKiwi) return false;
@@ -4528,12 +4529,12 @@ bool testGateOmega6G_DeterministicBaselinePreservation() {
     }
 
     uint64_t kiwiNodes = SearchController::getInstance().getStats().nodes + SearchController::getInstance().getStats().qNodes;
-    if (kiwiNodes != 44955) {
-        std::cerr << "[FAIL] Gate Omega 6-G: KiwiPete depth 6 nodes " << kiwiNodes << " != 44955\n";
+    if (kiwiNodes != 37515) {
+        std::cerr << "[FAIL] Gate Omega 6-G: KiwiPete depth 6 nodes " << kiwiNodes << " != 37515\n";
         return false;
     }
 
-    // 3. Full benchmark suite (6 canonical positions at depth 6) == 225,789 nodes
+    // 3. Full benchmark suite (6 canonical positions at depth 6) == 220,504 nodes
     BenchmarkConfig cfg;
     cfg.overrideDepth = 6;
     cfg.hashSizeMb = 16;
@@ -4542,9 +4543,9 @@ bool testGateOmega6G_DeterministicBaselinePreservation() {
     cfg.printConsole = false;
     BenchmarkRunRecord rec = BenchmarkRunner::run(cfg);
 
-    if (rec.aggregate.totalNodes != 225789) {
+    if (rec.aggregate.totalNodes != 220504) {
         std::cerr << "[FAIL] Gate Omega 6-G: Aggregate benchmark depth 6 nodes "
-                  << rec.aggregate.totalNodes << " != 225789\n";
+                  << rec.aggregate.totalNodes << " != 220504\n";
         return false;
     }
 
@@ -4584,7 +4585,7 @@ bool runMilestoneOmegaPhase6ParameterRegistryTests() {
     if (passF) passed++;
 
     bool passG = testGateOmega6G_DeterministicBaselinePreservation();
-    std::cout << "[" << (passG ? "PASS" : "FAIL") << "] Omega 6-G: Deterministic Node Baseline Preservation (225,789 nodes)\n";
+    std::cout << "[" << (passG ? "PASS" : "FAIL") << "] Omega 6-G: Deterministic Node Baseline Preservation (220,504 nodes)\n";
     if (passG) passed++;
 
     std::cout << "\n=================================================================\n";
@@ -4814,6 +4815,390 @@ bool runPhase65APvsTests() {
     return (passed == total);
 }
 
+// ---------------------------------------------------------------------------
+// Milestone Omega, Phase 6.5-B: Staged MovePicker State Machine Tests
+// ---------------------------------------------------------------------------
+
+bool testGate65B_1_FullMoveSetEquivalence() {
+    const char* fens[] = {
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+        "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+        "2rr2k1/1p3ppp/3p4/p2Np3/1PP1P3/2K2P2/P3q1PP/3R3R b - - 0 1",
+        "r1b2rk1/1p1nbppp/pq1p4/3B4/4PB2/1N6/PPP3PP/R2Q1R1K w - - 0 1",
+        "8/8/4k3/8/8/4K3/4P3/8 w - - 0 1",
+        "rnbqkb1r/pp1p1ppp/4pn2/2p5/2PP4/5N2/PP2PPPP/RNBQKB1R w KQkq - 0 4"
+    };
+
+    for (const char* fen : fens) {
+        auto opt = FenParser::parse(fen);
+        if (!opt) return false;
+        Position pos = *opt;
+
+        MoveList legal;
+        MoveGenerator::generateLegalMoves(pos, legal);
+
+        MoveList captures;
+        MoveGenerator::generateLegalCaptures(pos, captures);
+
+        MoveList quiets;
+        MoveGenerator::generateLegalQuiets(pos, quiets);
+
+        // Exact partition size
+        if (captures.size() + quiets.size() != legal.size()) {
+            std::cerr << "[FAIL] Phase 6.5-B Test 1: Partition size mismatch on " << fen
+                      << " (captures=" << captures.size() << " + quiets=" << quiets.size() 
+                      << " != legal=" << legal.size() << ")\n";
+            return false;
+        }
+
+        // Check captures are legal and not quiet
+        for (size_t i = 0; i < captures.size(); ++i) {
+            bool inLegal = false;
+            for (size_t j = 0; j < legal.size(); ++j) {
+                if (captures[i].getRawData() == legal[j].getRawData()) { inLegal = true; break; }
+            }
+            if (!inLegal) {
+                std::cerr << "[FAIL] Phase 6.5-B Test 1: Capture " << captures[i].toString() << " not in legal moves\n";
+                return false;
+            }
+            for (size_t j = 0; j < quiets.size(); ++j) {
+                if (captures[i].getRawData() == quiets[j].getRawData()) {
+                    std::cerr << "[FAIL] Phase 6.5-B Test 1: Move " << captures[i].toString() << " present in both captures and quiets\n";
+                    return false;
+                }
+            }
+        }
+
+        // Check quiets are legal
+        for (size_t i = 0; i < quiets.size(); ++i) {
+            bool inLegal = false;
+            for (size_t j = 0; j < legal.size(); ++j) {
+                if (quiets[i].getRawData() == legal[j].getRawData()) { inLegal = true; break; }
+            }
+            if (!inLegal) {
+                std::cerr << "[FAIL] Phase 6.5-B Test 1: Quiet " << quiets[i].toString() << " not in legal moves\n";
+                return false;
+            }
+        }
+
+        // Verify MovePicker(Normal) yields the exact set of legal moves
+        SearchContext ctx;
+        MovePicker picker(pos, Move::none(), ctx, PickerMode::Normal);
+        std::vector<Move> picked;
+        Move m;
+        while ((m = picker.nextMove()) != Move::none()) {
+            picked.push_back(m);
+        }
+
+        if (picked.size() != legal.size()) {
+            std::cerr << "[FAIL] Phase 6.5-B Test 1: MovePicker yielded " << picked.size()
+                      << " moves, expected " << legal.size() << " on " << fen << "\n";
+            return false;
+        }
+
+        // Deduplication & membership check
+        for (size_t i = 0; i < picked.size(); ++i) {
+            for (size_t j = i + 1; j < picked.size(); ++j) {
+                if (picked[i].getRawData() == picked[j].getRawData()) {
+                    std::cerr << "[FAIL] Phase 6.5-B Test 1: Duplicate move " << picked[i].toString() << " yielded by MovePicker\n";
+                    return false;
+                }
+            }
+            bool found = false;
+            for (size_t j = 0; j < legal.size(); ++j) {
+                if (picked[i].getRawData() == legal[j].getRawData()) { found = true; break; }
+            }
+            if (!found) {
+                std::cerr << "[FAIL] Phase 6.5-B Test 1: Yielded move " << picked[i].toString() << " is not legal\n";
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+bool testGate65B_2_PromotionPartitioning() {
+    // 1. Quiet promotions only
+    const std::string quietPromoFen = "8/4P3/8/8/8/8/8/4K2k w - - 0 1";
+    auto opt1 = FenParser::parse(quietPromoFen);
+    if (!opt1) return false;
+    Position pos1 = *opt1;
+
+    MoveList caps1, quiets1;
+    MoveGenerator::generateLegalCaptures(pos1, caps1);
+    MoveGenerator::generateLegalQuiets(pos1, quiets1);
+
+    if (caps1.size() != 0) {
+        std::cerr << "[FAIL] Phase 6.5-B Test 2: Expected 0 captures in quiet promo pos, got " << caps1.size() << "\n";
+        return false;
+    }
+    int promoCount = 0;
+    for (size_t i = 0; i < quiets1.size(); ++i) {
+        if (quiets1[i].isPromotion()) promoCount++;
+    }
+    if (promoCount != 4) {
+        std::cerr << "[FAIL] Phase 6.5-B Test 2: Expected 4 quiet promotions, got " << promoCount << "\n";
+        return false;
+    }
+
+    // 2. Capture promotions + Quiet promotions
+    const std::string capPromoFen = "5n2/4P3/8/8/8/8/8/4K2k w - - 0 1";
+    auto opt2 = FenParser::parse(capPromoFen);
+    if (!opt2) return false;
+    Position pos2 = *opt2;
+
+    MoveList caps2, quiets2;
+    MoveGenerator::generateLegalCaptures(pos2, caps2);
+    MoveGenerator::generateLegalQuiets(pos2, quiets2);
+
+    int capPromoCount = 0;
+    for (size_t i = 0; i < caps2.size(); ++i) {
+        if (caps2[i].isPromotion()) {
+            capPromoCount++;
+            if (caps2[i].getToSquare() != Square::F8) {
+                std::cerr << "[FAIL] Phase 6.5-B Test 2: Capture promo to wrong square: " << caps2[i].toString() << "\n";
+                return false;
+            }
+        }
+    }
+    if (capPromoCount != 4) {
+        std::cerr << "[FAIL] Phase 6.5-B Test 2: Expected 4 capture promotions, got " << capPromoCount << "\n";
+        return false;
+    }
+
+    int quietPromoCount = 0;
+    for (size_t i = 0; i < quiets2.size(); ++i) {
+        if (quiets2[i].isPromotion()) {
+            quietPromoCount++;
+            if (quiets2[i].getToSquare() != Square::E8) {
+                std::cerr << "[FAIL] Phase 6.5-B Test 2: Quiet promo to wrong square: " << quiets2[i].toString() << "\n";
+                return false;
+            }
+        }
+    }
+    if (quietPromoCount != 4) {
+        std::cerr << "[FAIL] Phase 6.5-B Test 2: Expected 4 quiet promotions, got " << quietPromoCount << "\n";
+        return false;
+    }
+
+    return true;
+}
+
+bool testGate65B_3_OrderingAndDeduplication() {
+    auto opt = FenParser::parse("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+    if (!opt) return false;
+    Position pos = *opt;
+
+    // a) TT Move first
+    Move ttMove(Square::E2, Square::E4, Move::Flags::DoublePawnPush);
+    SearchContext ctx;
+    MovePicker picker1(pos, ttMove, ctx, PickerMode::Normal);
+    Move firstMove = picker1.nextMove();
+    if (firstMove.getRawData() != ttMove.getRawData()) {
+        std::cerr << "[FAIL] Phase 6.5-B Test 3: TT move not yielded first: " << firstMove.toString() << "\n";
+        return false;
+    }
+
+    // b) Deduplication: TT move equals Killer 0
+    std::array<std::array<Move, 2>, 64> km{};
+    km[0][0] = ttMove;
+    km[0][1] = Move(Square::D2, Square::D4, Move::Flags::DoublePawnPush);
+    ctx.killerMoves = &km;
+
+    MovePicker picker2(pos, ttMove, ctx, PickerMode::Normal);
+    std::vector<Move> picked2;
+    Move m;
+    while ((m = picker2.nextMove()) != Move::none()) {
+        picked2.push_back(m);
+    }
+    if (picked2.size() != 20) {
+        std::cerr << "[FAIL] Phase 6.5-B Test 3: Total moves with TT==Killer0: " << picked2.size() << " != 20\n";
+        return false;
+    }
+    int ttCount = 0;
+    for (const auto& mv : picked2) {
+        if (mv.getRawData() == ttMove.getRawData()) ttCount++;
+    }
+    if (ttCount != 1) {
+        std::cerr << "[FAIL] Phase 6.5-B Test 3: TT move yielded " << ttCount << " times (expected 1)\n";
+        return false;
+    }
+
+    // c) Deduplication: Killer 0 equals Killer 1
+    km[0][0] = Move(Square::G1, Square::F3);
+    km[0][1] = Move(Square::G1, Square::F3);
+    MovePicker picker3(pos, Move::none(), ctx, PickerMode::Normal);
+    std::vector<Move> picked3;
+    while ((m = picker3.nextMove()) != Move::none()) {
+        picked3.push_back(m);
+    }
+    if (picked3.size() != 20) {
+        std::cerr << "[FAIL] Phase 6.5-B Test 3: Total moves with Killer0==Killer1: " << picked3.size() << " != 20\n";
+        return false;
+    }
+    int kCount = 0;
+    for (const auto& mv : picked3) {
+        if (mv.getRawData() == km[0][0].getRawData()) kCount++;
+    }
+    if (kCount != 1) {
+        std::cerr << "[FAIL] Phase 6.5-B Test 3: Killer move yielded " << kCount << " times (expected 1)\n";
+        return false;
+    }
+
+    // d) Deduplication: CounterMove equals Killer 0
+    km[0][0] = Move(Square::B1, Square::C3);
+    km[0][1] = Move::none();
+    MovePicker picker4(pos, Move::none(), ctx, PickerMode::Normal);
+    picker4.setCounterMove(Move(Square::B1, Square::C3));
+    std::vector<Move> picked4;
+    while ((m = picker4.nextMove()) != Move::none()) {
+        picked4.push_back(m);
+    }
+    if (picked4.size() != 20) {
+        std::cerr << "[FAIL] Phase 6.5-B Test 3: Total moves with CM==Killer0: " << picked4.size() << " != 20\n";
+        return false;
+    }
+    int cmCount = 0;
+    for (const auto& mv : picked4) {
+        if (mv.getRawData() == km[0][0].getRawData()) cmCount++;
+    }
+    if (cmCount != 1) {
+        std::cerr << "[FAIL] Phase 6.5-B Test 3: CM move yielded " << cmCount << " times (expected 1)\n";
+        return false;
+    }
+
+    return true;
+}
+
+bool testGate65B_4_QuiescenceModeIsolation() {
+    const char* fens[] = {
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+        "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+        "2rr2k1/1p3ppp/3p4/p2Np3/1PP1P3/2K2P2/P3q1PP/3R3R b - - 0 1"
+    };
+
+    for (const char* fen : fens) {
+        auto opt = FenParser::parse(fen);
+        if (!opt) return false;
+        Position pos = *opt;
+
+        SearchContext ctx;
+        MovePicker picker(pos, Move::none(), ctx, PickerMode::Quiescence);
+        Move m;
+        while ((m = picker.nextMove()) != Move::none()) {
+            if (!MovePicker::isCapture(pos, m)) {
+                std::cerr << "[FAIL] Phase 6.5-B Test 4: Quiet move " << m.toString()
+                          << " yielded in Quiescence mode on " << fen << "\n";
+                return false;
+            }
+            int seeVal = SEE::evaluate(pos, m.getFromSquare(), m.getToSquare());
+            if (seeVal < 0) {
+                std::cerr << "[FAIL] Phase 6.5-B Test 4: Losing capture " << m.toString()
+                          << " (SEE " << seeVal << ") yielded in Quiescence mode on " << fen << "\n";
+                return false;
+            }
+        }
+
+        // Test that quiet TT move is NOT yielded in Quiescence mode
+        Move quietTT(Square::E2, Square::E4);
+        if (!MovePicker::isCapture(pos, quietTT)) {
+            MovePicker pickerQuietTT(pos, quietTT, ctx, PickerMode::Quiescence);
+            Move first = pickerQuietTT.nextMove();
+            if (first.getRawData() == quietTT.getRawData()) {
+                std::cerr << "[FAIL] Phase 6.5-B Test 4: Quiet TT move yielded in Quiescence mode\n";
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+bool testGate65B_5_LegalityGuarantee() {
+    auto opt = FenParser::parse("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+    if (!opt) return false;
+    Position currentPos = *opt;
+
+    uint32_t seed = 42;
+    auto lcg = [&seed]() {
+        seed = seed * 1664525u + 1013904223u;
+        return seed;
+    };
+
+    int positionsTested = 0;
+    while (positionsTested < 1000) {
+        SearchContext ctx;
+        MovePicker picker(currentPos, Move::none(), ctx, PickerMode::Normal);
+        std::vector<Move> legalMoves;
+        Move m;
+        while ((m = picker.nextMove()) != Move::none()) {
+            Position testPos = currentPos;
+            UndoState undo;
+            MoveExecutor::makeMove(testPos, m, undo);
+            if (MoveGenerator::inCheck(testPos, currentPos.getSideToMove())) {
+                std::cerr << "[FAIL] Phase 6.5-B Test 5: MovePicker yielded illegal move " << m.toString()
+                          << " leaving king in check at pos #" << positionsTested << "\n";
+                return false;
+            }
+            legalMoves.push_back(m);
+        }
+
+        positionsTested++;
+        if (legalMoves.empty() || positionsTested % 40 == 0) {
+            // Reset to a canonical position to start a new walk
+            const char* resetFens[] = {
+                "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+                "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+                "2rr2k1/1p3ppp/3p4/p2Np3/1PP1P3/2K2P2/P3q1PP/3R3R b - - 0 1",
+                "r1b2rk1/1p1nbppp/pq1p4/3B4/4PB2/1N6/PPP3PP/R2Q1R1K w - - 0 1"
+            };
+            auto resetOpt = FenParser::parse(resetFens[(positionsTested / 40) % 4]);
+            if (resetOpt) currentPos = *resetOpt;
+        } else {
+            // Play a pseudorandom legal move to advance the walk
+            size_t idx = lcg() % legalMoves.size();
+            UndoState undo;
+            MoveExecutor::makeMove(currentPos, legalMoves[idx], undo);
+        }
+    }
+
+    return true;
+}
+
+bool runPhase65BMovePickerTests() {
+    std::cout << "\n=================================================================\n";
+    std::cout << "===  MILESTONE OMEGA, PHASE 6.5-B: STAGED MOVEPICKER TESTS    ===\n";
+    std::cout << "=================================================================\n";
+
+    int passed = 0;
+    int total = 5;
+
+    bool pass1 = testGate65B_1_FullMoveSetEquivalence();
+    std::cout << "[" << (pass1 ? "PASS" : "FAIL") << "] Phase 6.5-B Test 1: Full Move-Set Equivalence Across Canonical Positions\n";
+    if (pass1) passed++;
+
+    bool pass2 = testGate65B_2_PromotionPartitioning();
+    std::cout << "[" << (pass2 ? "PASS" : "FAIL") << "] Phase 6.5-B Test 2: Promotion Partitioning (Captures vs Quiets)\n";
+    if (pass2) passed++;
+
+    bool pass3 = testGate65B_3_OrderingAndDeduplication();
+    std::cout << "[" << (pass3 ? "PASS" : "FAIL") << "] Phase 6.5-B Test 3: Move Ordering & Multi-Stage Deduplication\n";
+    if (pass3) passed++;
+
+    bool pass4 = testGate65B_4_QuiescenceModeIsolation();
+    std::cout << "[" << (pass4 ? "PASS" : "FAIL") << "] Phase 6.5-B Test 4: Quiescence Mode Isolation & Winning Capture Filtration\n";
+    if (pass4) passed++;
+
+    bool pass5 = testGate65B_5_LegalityGuarantee();
+    std::cout << "[" << (pass5 ? "PASS" : "FAIL") << "] Phase 6.5-B Test 5: Strict Legality Guarantee (1,000 Random Walk Positions)\n";
+    if (pass5) passed++;
+
+    std::cout << "\n=================================================================\n";
+    std::cout << "PHASE 6.5-B MOVEPICKER RESULT: " << passed << "/" << total << " Test Categories Passed.\n";
+    std::cout << "=================================================================\n";
+
+    return (passed == total);
+}
+
 bool runOperationalSmokeMatch20Games() {
     std::cout << "\n=================================================================\n";
     std::cout << "===   RUNNING 20-GAME COLOR-BALANCED STRENGTH SMOKE MATCH     ===\n";
@@ -4908,7 +5293,35 @@ int main() {
     bool omegaPhase5Success = Boson::runMilestoneOmegaPhase5StrengthTests();
     bool omegaPhase6Success = Boson::runMilestoneOmegaPhase6ParameterRegistryTests();
     bool phase65ASuccess = Boson::runPhase65APvsTests();
+    bool phase65BSuccess = Boson::runPhase65BMovePickerTests();
     bool smokeMatchSuccess = Boson::runOperationalSmokeMatch20Games();
     Boson::runDiagnostics();
-    return (m1Phase2Success && m1Module13Success && m2PhasesBCSuccess && m2PerftSuccess && phaseYZSuccess && phaseAASuccess && phaseABSuccess && m6Phase12Success && m6Module63Success && m6Module64Success && m6Module65Success && m6Module66Success && m6Module67Success && m6Module68Success && m6Module69Success && m6Module610Success && omegaPhase1Success && omegaPhase2Success && omegaPhase3Success && omegaPhase4Success && omegaPhase5Success && omegaPhase6Success && phase65ASuccess && smokeMatchSuccess) ? 0 : 1;
+    std::cout << "\n=== TEST SUITE RESULTS ===\n"
+              << "m1Phase2: " << m1Phase2Success << "\n"
+              << "m1Module13: " << m1Module13Success << "\n"
+              << "m2PhasesBC: " << m2PhasesBCSuccess << "\n"
+              << "m2Perft: " << m2PerftSuccess << "\n"
+              << "phaseYZ: " << phaseYZSuccess << "\n"
+              << "phaseAA: " << phaseAASuccess << "\n"
+              << "phaseAB: " << phaseABSuccess << "\n"
+              << "m6Phase12: " << m6Phase12Success << "\n"
+              << "m6Module63: " << m6Module63Success << "\n"
+              << "m6Module64: " << m6Module64Success << "\n"
+              << "m6Module65: " << m6Module65Success << "\n"
+              << "m6Module66: " << m6Module66Success << "\n"
+              << "m6Module67: " << m6Module67Success << "\n"
+              << "m6Module68: " << m6Module68Success << "\n"
+              << "m6Module69: " << m6Module69Success << "\n"
+              << "m6Module610: " << m6Module610Success << "\n"
+              << "omegaPhase1: " << omegaPhase1Success << "\n"
+              << "omegaPhase2: " << omegaPhase2Success << "\n"
+              << "omegaPhase3: " << omegaPhase3Success << "\n"
+              << "omegaPhase4: " << omegaPhase4Success << "\n"
+              << "omegaPhase5: " << omegaPhase5Success << "\n"
+              << "omegaPhase6: " << omegaPhase6Success << "\n"
+              << "phase65A: " << phase65ASuccess << "\n"
+              << "phase65B: " << phase65BSuccess << "\n"
+              << "smokeMatch: " << smokeMatchSuccess << "\n"
+              << "==========================\n";
+    return (m1Phase2Success && m1Module13Success && m2PhasesBCSuccess && m2PerftSuccess && phaseYZSuccess && phaseAASuccess && phaseABSuccess && m6Phase12Success && m6Module63Success && m6Module64Success && m6Module65Success && m6Module66Success && m6Module67Success && m6Module68Success && m6Module69Success && m6Module610Success && omegaPhase1Success && omegaPhase2Success && omegaPhase3Success && omegaPhase4Success && omegaPhase5Success && omegaPhase6Success && phase65ASuccess && phase65BSuccess && smokeMatchSuccess) ? 0 : 1;
 }

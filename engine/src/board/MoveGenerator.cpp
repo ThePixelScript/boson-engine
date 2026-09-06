@@ -411,6 +411,214 @@ void MoveGenerator::generateLegalMoves(const Position& pos, MoveList& legalMoves
     }
 }
 
+void MoveGenerator::generateLegalCaptures(const Position& pos, MoveList& captures) noexcept {
+    initializeTables();
+    const Color us = pos.getSideToMove();
+    const Bitboard enemyOccupancy = pos.getColorOccupancy(!us);
+    const Bitboard totalOccupancy = pos.getTotalOccupancy();
+
+    MoveList pseudoMoves;
+
+    // 1. Knights
+    Bitboard knights = pos.getPieceBitboard((us == Color::White) ? Piece::WhiteKnight : Piece::BlackKnight);
+    while (knights) {
+        unsigned long sq = countTrailingZeros(knights);
+        Bitboard validMoves = s_knightAttacks[sq] & enemyOccupancy;
+        while (validMoves) {
+            unsigned long targetSq = countTrailingZeros(validMoves);
+            pseudoMoves.push_back(Move(static_cast<Square>(sq), static_cast<Square>(targetSq)));
+            validMoves &= validMoves - 1;
+        }
+        knights &= knights - 1;
+    }
+
+    // 2. King
+    Bitboard king = pos.getPieceBitboard((us == Color::White) ? Piece::WhiteKing : Piece::BlackKing);
+    if (king) {
+        unsigned long sq = countTrailingZeros(king);
+        Bitboard validMoves = s_kingAttacks[sq] & enemyOccupancy;
+        while (validMoves) {
+            unsigned long targetSq = countTrailingZeros(validMoves);
+            pseudoMoves.push_back(Move(static_cast<Square>(sq), static_cast<Square>(targetSq)));
+            validMoves &= validMoves - 1;
+        }
+    }
+
+    // 3. Pawns (Captures, Capture Promotions, En Passant)
+    const Bitboard pawns = pos.getPieceBitboard((us == Color::White) ? Piece::WhitePawn : Piece::BlackPawn);
+    if (us == Color::White) {
+        generatePawnCaptures(pos, pawns, 8, enemyOccupancy, pseudoMoves);
+    } else {
+        generatePawnCaptures(pos, pawns, -8, enemyOccupancy, pseudoMoves);
+    }
+
+    // 4. Sliders
+    std::array<Piece, 3> piecesToGen = {
+        (us == Color::White) ? Piece::WhiteRook : Piece::BlackRook,
+        (us == Color::White) ? Piece::WhiteBishop : Piece::BlackBishop,
+        (us == Color::White) ? Piece::WhiteQueen : Piece::BlackQueen
+    };
+
+    for (int i = 0; i < 3; ++i) {
+        Bitboard pieceBb = pos.getPieceBitboard(piecesToGen[i]);
+        while (pieceBb) {
+            unsigned long sq = countTrailingZeros(pieceBb);
+            Bitboard attacks = 0ULL;
+            if (i == 0)      attacks = getRookAttacks(static_cast<Square>(sq), totalOccupancy);
+            else if (i == 1) attacks = getBishopAttacks(static_cast<Square>(sq), totalOccupancy);
+            else             attacks = getQueenAttacks(static_cast<Square>(sq), totalOccupancy);
+
+            Bitboard validMoves = attacks & enemyOccupancy;
+            while (validMoves) {
+                unsigned long targetSq = countTrailingZeros(validMoves);
+                pseudoMoves.push_back(Move(static_cast<Square>(sq), static_cast<Square>(targetSq)));
+                validMoves &= validMoves - 1;
+            }
+            pieceBb &= pieceBb - 1;
+        }
+    }
+
+    // Legality Filter
+    Position tempPos = pos;
+    for (size_t i = 0; i < pseudoMoves.size(); ++i) {
+        const Move& move = pseudoMoves[i];
+        UndoState undo;
+        MoveExecutor::makeMove(tempPos, move, undo);
+        if (!inCheck(tempPos, us)) {
+            captures.push_back(move);
+        }
+        MoveExecutor::undoMove(tempPos, move, undo);
+    }
+}
+
+void MoveGenerator::generateLegalQuiets(const Position& pos, MoveList& quiets) noexcept {
+    initializeTables();
+    const Color us = pos.getSideToMove();
+    const Color them = (us == Color::White) ? Color::Black : Color::White;
+    const Bitboard totalOccupancy = pos.getTotalOccupancy();
+    const Bitboard emptySquares = ~totalOccupancy;
+
+    MoveList pseudoMoves;
+
+    // 1. Knights
+    Bitboard knights = pos.getPieceBitboard((us == Color::White) ? Piece::WhiteKnight : Piece::BlackKnight);
+    while (knights) {
+        unsigned long sq = countTrailingZeros(knights);
+        Bitboard validMoves = s_knightAttacks[sq] & emptySquares;
+        while (validMoves) {
+            unsigned long targetSq = countTrailingZeros(validMoves);
+            pseudoMoves.push_back(Move(static_cast<Square>(sq), static_cast<Square>(targetSq)));
+            validMoves &= validMoves - 1;
+        }
+        knights &= knights - 1;
+    }
+
+    // 2. King (Steps + Castling)
+    Bitboard king = pos.getPieceBitboard((us == Color::White) ? Piece::WhiteKing : Piece::BlackKing);
+    if (king) {
+        unsigned long sq = countTrailingZeros(king);
+        Bitboard validMoves = s_kingAttacks[sq] & emptySquares;
+        while (validMoves) {
+            unsigned long targetSq = countTrailingZeros(validMoves);
+            pseudoMoves.push_back(Move(static_cast<Square>(sq), static_cast<Square>(targetSq)));
+            validMoves &= validMoves - 1;
+        }
+
+        CastlingRights rights = pos.getCastlingRights();
+        if (us == Color::White) {
+            if (static_cast<bool>(rights & CastlingRights::WhiteOO)) {
+                if (!(totalOccupancy & (Bitboards::getSquareBit(Square::F1) | Bitboards::getSquareBit(Square::G1)))) {
+                    pseudoMoves.push_back(Move(Square::E1, Square::G1, Move::Flags::Castling));
+                }
+            }
+            if (static_cast<bool>(rights & CastlingRights::WhiteOOO)) {
+                if (!(totalOccupancy & (Bitboards::getSquareBit(Square::D1) | Bitboards::getSquareBit(Square::C1) | Bitboards::getSquareBit(Square::B1)))) {
+                    pseudoMoves.push_back(Move(Square::E1, Square::C1, Move::Flags::Castling));
+                }
+            }
+        } else {
+            if (static_cast<bool>(rights & CastlingRights::BlackOO)) {
+                if (!(totalOccupancy & (Bitboards::getSquareBit(Square::F8) | Bitboards::getSquareBit(Square::G8)))) {
+                    pseudoMoves.push_back(Move(Square::E8, Square::G8, Move::Flags::Castling));
+                }
+            }
+            if (static_cast<bool>(rights & CastlingRights::BlackOOO)) {
+                if (!(totalOccupancy & (Bitboards::getSquareBit(Square::D8) | Bitboards::getSquareBit(Square::C8) | Bitboards::getSquareBit(Square::B8)))) {
+                    pseudoMoves.push_back(Move(Square::E8, Square::C8, Move::Flags::Castling));
+                }
+            }
+        }
+    }
+
+    // 3. Pawns (Pushes, Double Pushes, Quiet Promotions)
+    const Bitboard pawns = pos.getPieceBitboard((us == Color::White) ? Piece::WhitePawn : Piece::BlackPawn);
+    if (us == Color::White) {
+        generatePawnPushes(pos, pawns, 8, 0xFF00ULL, pseudoMoves);
+    } else {
+        generatePawnPushes(pos, pawns, -8, 0xFF000000000000ULL, pseudoMoves);
+    }
+
+    // 4. Sliders
+    std::array<Piece, 3> piecesToGen = {
+        (us == Color::White) ? Piece::WhiteRook : Piece::BlackRook,
+        (us == Color::White) ? Piece::WhiteBishop : Piece::BlackBishop,
+        (us == Color::White) ? Piece::WhiteQueen : Piece::BlackQueen
+    };
+
+    for (int i = 0; i < 3; ++i) {
+        Bitboard pieceBb = pos.getPieceBitboard(piecesToGen[i]);
+        while (pieceBb) {
+            unsigned long sq = countTrailingZeros(pieceBb);
+            Bitboard attacks = 0ULL;
+            if (i == 0)      attacks = getRookAttacks(static_cast<Square>(sq), totalOccupancy);
+            else if (i == 1) attacks = getBishopAttacks(static_cast<Square>(sq), totalOccupancy);
+            else             attacks = getQueenAttacks(static_cast<Square>(sq), totalOccupancy);
+
+            Bitboard validMoves = attacks & emptySquares;
+            while (validMoves) {
+                unsigned long targetSq = countTrailingZeros(validMoves);
+                pseudoMoves.push_back(Move(static_cast<Square>(sq), static_cast<Square>(targetSq)));
+                validMoves &= validMoves - 1;
+            }
+            pieceBb &= pieceBb - 1;
+        }
+    }
+
+    // Legality Filter (including castling checks)
+    Position tempPos = pos;
+    for (size_t i = 0; i < pseudoMoves.size(); ++i) {
+        const Move& move = pseudoMoves[i];
+        UndoState undo;
+
+        if (move.isCastling()) {
+            if (inCheck(tempPos, us)) continue;
+
+            Square to = move.getToSquare();
+            if (to == Square::G1 && (isSquareAttacked(tempPos, Square::E1, them) || 
+                                    isSquareAttacked(tempPos, Square::F1, them) || 
+                                    isSquareAttacked(tempPos, Square::G1, them))) continue;
+            
+            if (to == Square::C1 && (isSquareAttacked(tempPos, Square::E1, them) || 
+                                    isSquareAttacked(tempPos, Square::D1, them) || 
+                                    isSquareAttacked(tempPos, Square::C1, them))) continue;
+                                    
+            if (to == Square::G8 && (isSquareAttacked(tempPos, Square::E8, them) || 
+                                    isSquareAttacked(tempPos, Square::F8, them) || 
+                                    isSquareAttacked(tempPos, Square::G8, them))) continue;
+                                    
+            if (to == Square::C8 && (isSquareAttacked(tempPos, Square::E8, them) || 
+                                    isSquareAttacked(tempPos, Square::D8, them) || 
+                                    isSquareAttacked(tempPos, Square::C8, them))) continue;
+        }
+
+        MoveExecutor::makeMove(tempPos, move, undo);
+        if (!inCheck(tempPos, us)) {
+            quiets.push_back(move);
+        }
+        MoveExecutor::undoMove(tempPos, move, undo);
+    }
+}
+
 void MoveGenerator::generateTacticalMoves(const Position& pos, MoveList& moves) noexcept {
     MoveList allMoves;
     generateLegalMoves(pos, allMoves);
