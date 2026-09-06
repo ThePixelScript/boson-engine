@@ -16,6 +16,11 @@ if(MSVC)
         /permissive- 
     )
     add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
+    set_source_files_properties(
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/eval/nnue/AVX2Accumulator.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/eval/nnue/AVX2Inference.cpp"
+        PROPERTIES COMPILE_FLAGS "/arch:AVX2"
+    )
 else()
     add_compile_options(
         -Wall

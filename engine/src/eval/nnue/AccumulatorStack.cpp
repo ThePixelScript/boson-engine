@@ -1,7 +1,16 @@
 #include "eval/nnue/AccumulatorStack.hpp"
+#include "eval/nnue/AVX2Accumulator.hpp"
+#include "eval/nnue/AVX2Inference.hpp"
 #include <cassert>
 
 namespace Boson::eval::nnue {
+
+namespace {
+inline bool useAVX2() noexcept {
+    return AVX2Inference::getActiveBackend() == InferenceBackend::AVX2 ||
+           (AVX2Inference::getActiveBackend() == InferenceBackend::Auto && AVX2Inference::isSupported());
+}
+} // namespace
 
 std::unique_ptr<FeatureWeights> FeatureWeights::createDeterministic(uint64_t seed) {
     auto fw = std::unique_ptr<FeatureWeights>(new FeatureWeights);
@@ -42,6 +51,11 @@ void AccumulatorStack::rebuildPerspective(AccumulatorHalf& outHalf,
                                           const Position& pos,
                                           Color perspective,
                                           const FeatureWeights& weights) noexcept {
+    if (useAVX2()) {
+        AVX2Accumulator::rebuildPerspective(outHalf, pos, perspective, weights);
+        return;
+    }
+
     const auto activeFeatures = FeatureTransformer::getActiveFeatures(pos, perspective);
 
     for (size_t i = 0; i < ACCUMULATOR_SIZE; ++i) {
@@ -92,23 +106,27 @@ void AccumulatorStack::pushMove(const Position& before,
             const AccumulatorHalf& prevHalf = prevAcc.get(c);
             AccumulatorHalf& currHalf = currAcc.get(c);
 
-            currHalf = prevHalf;
+            if (useAVX2()) {
+                AVX2Accumulator::updateAccumulator(currHalf, prevHalf, m_removed, m_added, weights);
+            } else {
+                currHalf = prevHalf;
 
-            for (int r : m_removed) {
-                if (r < 0 || r >= HALFKP_FEATURES) continue;
-                const auto& w = weights.weights[static_cast<size_t>(r)];
-                for (size_t i = 0; i < ACCUMULATOR_SIZE; ++i) {
-                    int32_t val = static_cast<int32_t>(currHalf.values[i]) - static_cast<int32_t>(w[i]);
-                    currHalf.values[i] = static_cast<int16_t>(val);
+                for (int r : m_removed) {
+                    if (r < 0 || r >= HALFKP_FEATURES) continue;
+                    const auto& w = weights.weights[static_cast<size_t>(r)];
+                    for (size_t i = 0; i < ACCUMULATOR_SIZE; ++i) {
+                        int32_t val = static_cast<int32_t>(currHalf.values[i]) - static_cast<int32_t>(w[i]);
+                        currHalf.values[i] = static_cast<int16_t>(val);
+                    }
                 }
-            }
 
-            for (int a : m_added) {
-                if (a < 0 || a >= HALFKP_FEATURES) continue;
-                const auto& w = weights.weights[static_cast<size_t>(a)];
-                for (size_t i = 0; i < ACCUMULATOR_SIZE; ++i) {
-                    int32_t val = static_cast<int32_t>(currHalf.values[i]) + static_cast<int32_t>(w[i]);
-                    currHalf.values[i] = static_cast<int16_t>(val);
+                for (int a : m_added) {
+                    if (a < 0 || a >= HALFKP_FEATURES) continue;
+                    const auto& w = weights.weights[static_cast<size_t>(a)];
+                    for (size_t i = 0; i < ACCUMULATOR_SIZE; ++i) {
+                        int32_t val = static_cast<int32_t>(currHalf.values[i]) + static_cast<int32_t>(w[i]);
+                        currHalf.values[i] = static_cast<int16_t>(val);
+                    }
                 }
             }
         }

@@ -1,5 +1,6 @@
 #include "eval/nnue/NNUEEvaluator.hpp"
 #include "eval/nnue/ScalarInference.hpp"
+#include "eval/nnue/AVX2Inference.hpp"
 
 namespace Boson::eval::nnue {
 
@@ -7,6 +8,10 @@ NNUEEvaluator::NNUEEvaluator(const NetworkModel& model) noexcept
     : m_model(model), m_stack() {}
 
 int NNUEEvaluator::evaluate(const Position& pos) noexcept {
+    if (AVX2Inference::getActiveBackend() == InferenceBackend::AVX2 ||
+        (AVX2Inference::getActiveBackend() == InferenceBackend::Auto && AVX2Inference::isSupported())) {
+        return AVX2Inference::evaluate(m_stack.top(), pos.sideToMove(), m_model);
+    }
     return ScalarInference::evaluate(m_stack.top(), pos.sideToMove(), m_model);
 }
 

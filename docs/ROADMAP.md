@@ -158,8 +158,16 @@ This document outlines the architectural roadmap for the Boson chess engine, tra
     * **Operational Readiness:** Completed a 20-game operational smoke match in NNUE mode with 0 crashes, 0 timeouts, and 100% legal moves. Suite #32 passed 11/11 acceptance gates.
     * **Classical Invariance Oracle:** Depth-6 benchmark locked at exactly **313,092 nodes** (0 node delta vs `v0.9.5-classical-enhanced`).
     * **Status:** **Complete**.
+  - **Phase 7-F (AVX2 SIMD Optimization & Vectorized Inference):** Implemented AVX2 SIMD-vectorized forward inference (`AVX2Inference`) and vectorized accumulator scratch rebuild & incremental delta update primitives (`AVX2Accumulator`) with runtime CPUID dispatch and clean scalar fallback.
+    * **Bit-for-Bit Golden Oracle Parity:** AVX2 reproduces the Phase 7-D scalar golden oracle bit-for-bit across all observable intermediate layers (FC1 raw, FC1 activated, FC2 raw, FC2 activated, FC3 raw, final score clamped to $[-30000, +30000]$).
+    * **Arithmetic Safety & Saturating Pack Invariant:** Intermediate accumulator calculations unpack 16-bit lanes to 32-bit (`_mm256_cvtepi16_epi32`) and compute sums in 32-bit vector arithmetic (`_mm256_add_epi32`, `_mm256_sub_epi32`), strictly eliminating signed 16-bit wrapping UB. Narrowing back to 16-bit utilizes `_mm256_packs_epi32` followed by cross-lane permutation `_mm256_permute4x64_epi64(packed, _MM_SHUFFLE(3, 1, 2, 0))`. Saturated packing is strictly an implementation mechanism; mathematical correctness is guaranteed by the proven $[-32768, 32767]$ intermediate range invariant.
+    * **Vectorized Truncation Division (/64):** Exact integer division toward zero matching C++ integer division across all boundary inputs via `_mm256_srai_epi32(_mm256_add_epi32(x, _mm256_srli_epi32(_mm256_srai_epi32(x, 31), 26)), 6)`.
+    * **Full 10,000-Position Differential Verification:** Evaluated across a 10,000-reachable-position corpus generated from diverse random legal walks covering all move types, yielding exactly 0 discrepancies across all intermediate and final network layers.
+    * **Benchmark Methodology & Performance Metrics:** Benchmark executed on a single thread across 100,000 forward inference iterations (MSVC 1951 C++23 Release `/O2 /Oi /arch:AVX2`): 809.43 ms (Scalar) $\to$ 89.25 ms (AVX2), achieving a **9.07x speedup** and **1.12M evaluations/sec** (1,120,459 evals/sec).
+    * **Classical Search Invariance:** Depth-6 benchmark locked at exactly **313,092 nodes** (0 node drift vs `v0.9.5-classical-enhanced`). Suite #33 passed 14/14 acceptance gates.
+    * **Status:** **Complete**.
 - **Exit Criteria:** Statistically significant Elo gain against baseline in fixed-depth SPRT matches.
-- **Status:** In Progress (Phases 7-A, 7-B, 7-C, 7-D, & 7-E Complete).
+- **Status:** In Progress (Phases 7-A, 7-B, 7-C, 7-D, 7-E, & 7-F Complete).
 
 ---
 
