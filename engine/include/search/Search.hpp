@@ -56,6 +56,35 @@ public:
     static int evaluate(const Position& pos) noexcept;
     static int negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLine& pv, bool allowNull = true, Move prevMove = Move()) noexcept;
 
+    struct StackEntry {
+        int staticEval = 0;
+        bool inCheck = false;
+    };
+
+    static std::array<StackEntry, 128> s_searchStack;
+    static void clearStack() noexcept { s_searchStack.fill(StackEntry{}); }
+    [[nodiscard]] static std::array<StackEntry, 128>& getStack() noexcept { return s_searchStack; }
+
+    [[nodiscard]] static bool isImproving(int ply, bool inCheck, int staticEval) noexcept {
+        if (ply < 2 || ply >= 128) return false;
+        if (inCheck || s_searchStack[ply - 2].inCheck) return false;
+        const int prevEval = s_searchStack[ply - 2].staticEval;
+        if (std::abs(staticEval) >= (MATE_SCORE - MAX_PLY) || std::abs(prevEval) >= (MATE_SCORE - MAX_PLY)) {
+            return false;
+        }
+        return staticEval > prevEval;
+    }
+
+    [[nodiscard]] static int computeLmrReduction(int baseReduction, bool improving, int improvingBonus, int depth) noexcept {
+        int r = baseReduction;
+        if (improving) {
+            r += improvingBonus;
+        } else {
+            r = std::max(0, r - 1);
+        }
+        return std::clamp(r, 0, std::max(0, depth - 2));
+    }
+
 private:
     static CounterMoveTable s_cmTable;
     static ContinuationHistoryTable s_chTable; // Managed memory layer

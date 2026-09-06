@@ -114,6 +114,19 @@ This document outlines the architectural roadmap for the Boson chess engine, tra
 
 ---
 
+## Phase 6.5: Classical Search Enhancements Suite
+- **Scope:** Modernize alpha-beta negamax with interior node scouting, pull-based staged move picking, pre-move pruning, and history-guided reduction modulation.
+- **Key Modules:**
+  - **Phase 6.5-A (Principal Variation Search & Zero-Window Scouting):** Full-window search on PV moves, zero-window scout searches on sibling candidates, and full-window re-searches on fail-highs. (Depth-6 Benchmark: 251,466 nodes).
+  - **Phase 6.5-B (Staged MovePicker State Machine):** Pull-based staged legal move generator yielding candidate moves lazily across 8 stages (TTMove $\rightarrow$ GoodCaptures $\rightarrow$ EqualCaptures $\rightarrow$ Killers $\rightarrow$ CounterMoves $\rightarrow$ Quiets $\rightarrow$ BadCaptures $\rightarrow$ Delay). (Depth-6 Benchmark: 243,365 nodes).
+  - **Phase 6.5-C (Reverse Futility Pruning):** Static evaluation pre-move cutoff at non-PV frontier nodes (depth 1–3, $M = 75 \times \text{depth}$) with strict TT write avoidance on cutoff. (Depth-6 Benchmark: 207,068 nodes).
+  - **Phase 6.5-D (The Improving Heuristic - LMR-Only Modulation):** Search stack dynamic evaluation tracking ($staticEval > ss[ply - 2].staticEval$) modulating quiet late-move reductions ($r \leftarrow baseReduction + 1$ when improving, $r \leftarrow \max(0, baseReduction - 1)$ when non-improving; safety clamped to $r \le \text{depth} - 2$).
+- **Benchmark Result:** Depth-6 isolated benchmark produces **313,092 nodes** (+51.2% vs Phase 6.5-C baseline of 207,068 nodes, reflecting deeper search on non-improving lines).
+- **Strength Validation:** 100-game color-balanced match at 50ms/move: 50.0 / 100 (+13 =74 -13, $\Delta\text{Elo} = 0.0 \pm 67.7$ at 95% CI; SPRT LLR: -0.04), noting no statistically significant strength effect detected at 50ms movetime.
+- **Status:** **Complete**. Phase 6.5 classical search enhancements are concluded, pending formal freeze tag (`v0.9.5-classical-enhanced`).
+
+---
+
 ## Milestone 7: Positional Evaluation & Automated Tuning
 - **Scope:** Expand positional knowledge and automate parameter optimization.
 - **Key Deliverables:**

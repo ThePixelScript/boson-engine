@@ -50,6 +50,9 @@ void ParameterRegistry::registerDefaultParameters() {
     registerParam(ParameterDescriptor::createInt(
         "LMR_MinMoveCount", "Minimum move index threshold before LMR is applied",
         ParamGroup::SearchReductions, 4, 1, 20, ResetRequirement::None));
+    registerParam(ParameterDescriptor::createInt(
+        "LMR_ImprovingBonus", "Additional depth reduction applied to eligible quiet moves when position is improving",
+        ParamGroup::SearchReductions, 1, 0, 2, ResetRequirement::None, true, true));
 
     // 4. Search Selectivity (Aspiration)
     registerParam(ParameterDescriptor::createInt(
@@ -307,6 +310,7 @@ void ParameterRegistry::syncToEngineParameters(EngineParameters& params) const {
     params.search.aspirationMaxDelta = static_cast<int>(getInt("Aspiration_MaxDelta"));
     params.search.killerSlotCount = static_cast<int>(getInt("Killer_SlotCount"));
     params.search.rfpMarginBase = static_cast<int>(getInt("RFP_MarginBase"));
+    params.search.lmrImprovingBonus = static_cast<int>(getInt("LMR_ImprovingBonus"));
 
     params.eval.pawnValue = static_cast<int>(getInt("PawnValue"));
     params.eval.knightValue = static_cast<int>(getInt("KnightValue"));
@@ -334,6 +338,7 @@ void ParameterRegistry::loadFromEngineParameters(const EngineParameters& params)
     setParam("LMR_Divisor", params.search.lmrDivisor);
     setParam("LMR_MinDepth", static_cast<int64_t>(params.search.lmrMinDepth));
     setParam("LMR_MinMoveCount", static_cast<int64_t>(params.search.lmrMinMoveCount));
+    setParam("LMR_ImprovingBonus", static_cast<int64_t>(params.search.lmrImprovingBonus));
     setParam("NMP_DepthDivisor", static_cast<int64_t>(params.search.nmpMinDepth));
     setParam("NMP_BaseReduction", static_cast<int64_t>(params.search.nmpReduction));
     setParam("RFP_MarginBase", static_cast<int64_t>(params.search.rfpMarginBase));

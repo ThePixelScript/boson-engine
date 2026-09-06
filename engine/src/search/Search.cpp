@@ -18,6 +18,7 @@ CounterMoveTable Search::s_cmTable;
 ContinuationHistoryTable Search::s_chTable;
 std::array<std::array<Move, 2>, 64> Search::s_killerMoves{};
 std::array<std::array<uint32_t, 64>, 12> Search::s_historyTable{};
+std::array<Search::StackEntry, 128> Search::s_searchStack{};
 
 uint64_t Search::perft(Position& pos, int depth) noexcept {
     if (depth == 0) return 1ULL;
@@ -178,6 +179,12 @@ int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLi
     }
 
     int staticEval = evaluate(pos);
+    if (ply < 128) {
+        s_searchStack[ply].staticEval = staticEval;
+        s_searchStack[ply].inCheck = inCheck;
+    }
+
+    const bool improving = isImproving(ply, inCheck, staticEval);
 
     // Reverse Futility Pruning (RFP)
     if (!isPvNode && !inCheck && depth >= 1 && depth <= 3) {
@@ -257,7 +264,8 @@ int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLi
         if (params.debug.enableLMR && moveCount > 0 && searchedDepth >= params.search.lmrMinDepth &&
             isLateMove && !isPvMove && !inCheck && !isCaptureMove && !isPromotionMove && !givesCheck && !inEnemyKingZone) {
             
-            r = LMRPolicy::getReduction(searchedDepth, movesSearched);
+            int baseReduction = LMRPolicy::getReduction(searchedDepth, movesSearched);
+            r = computeLmrReduction(baseReduction, improving, params.search.lmrImprovingBonus, depth);
 
             // Killer Move discount: Proven refutations receive reduced reduction
             const bool isKiller = (ply < 64) && (s_killerMoves[ply][0].getRawData() == m.getRawData() ||
@@ -283,7 +291,7 @@ int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLi
                 r = 0;
             }
 
-            r = std::clamp(r, 0, searchedDepth - 1);
+            r = std::clamp(r, 0, std::max(0, depth - 2));
         }
 
         if (r > 0) {
@@ -555,6 +563,7 @@ int Search::runSearch(Position& pos, const SearchLimits& limits) noexcept {
         s_chTable.clear();
 
         Evaluator::getCorrHist().clear(); 
+        clearStack();
     } 
 
     std::cout << "[BOSON SEARCH] Running Ordered Alpha-Beta + Aspiration Framework...\n";

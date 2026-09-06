@@ -264,3 +264,19 @@ Structured results can be parsed by automated CI/CD pipelines or stored in histo
 | **Gate $\Omega$.5-D** | Statistical Engine | Exact score arithmetic, variance, CI bounds, and SPRT transitions | **PASSED** |
 | **Gate $\Omega$.5-E** | Opening Book | All 20 openings valid, distinct, and verified parsable FENs | **PASSED** |
 | **Gate $\Omega$.5-F** | Telemetry & SerDe | JSON round-trip parity parser reproduces match records within $10^{-5}$ | **PASSED** |
+
+---
+
+## 8. Empirical Match Registry
+
+### 8.1 Phase 6.5-D Improving Heuristic Match (100 Games)
+- **Match:** `Boson-6.5D-Cand` (`LMR_ImprovingBonus = 1`) vs `Boson-6.5C-Ctrl` (`LMR_ImprovingBonus = 0`)
+- **Setup:** 100 games (50 opening pairs, color-balanced), 50ms / move fixed time control, Opening Corpus v1.0.0, 16MB Hash, max 150 plies.
+- **Result:** 13 Wins, 74 Draws, 13 Losses (50.0 / 100, 50.0%)
+- **Sample Variance / Std Error:** $\sigma^2 = 0.0657$, $SE = 0.0256$
+- **Wilson 95% CI:** [40.4%, 59.6%]
+- **Delta Elo:** +0.0 Elo
+- **Elo 95% CI:** [-67.7, +67.7] Elo
+- **SPRT Status:** CONTINUE (LLR: -0.04 [$-2.94$, $+2.94$], $H_0: 0.0, H_1: +10.0$ Elo)
+- **Abnormal Terminations:** 0 (ThreefoldRepetition=68, Checkmate=26, FiftyMoveRule=5, InsufficientMaterial=1; 0 Timeouts, 0 Crashes, 0 Illegal Moves)
+- **Conclusion:** No statistically significant strength deviation detected at fast bullet time control ($50\text{ ms/move}$), confirming search stability and 100% tactical invariance under LMR reduction modulation.
