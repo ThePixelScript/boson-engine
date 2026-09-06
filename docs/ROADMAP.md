@@ -137,9 +137,15 @@ This document outlines the architectural roadmap for the Boson chess engine, tra
     * **Contract & Verification:** Verified complete feature-index domain coverage with no collisions under the canonical indexing scheme ($\text{Index} \in [0, 40959]$) across all 64 king squares, 10 piece codes, and 64 piece squares. Suite #29 passed 11/11 validation gates, including a 10,000-ply / 20,000-perspective delta equivalence oracle ($(\text{Features}(P_{\text{before}}) \setminus \text{removed}) \cup \text{added} == \text{Features}(P_{\text{after}})$).
     * **Architectural Invariant:** Standalone evaluative infrastructure; zero search or parameter modifications; exact depth-6 benchmark node count parity maintained (313,092 nodes == 313,092 nodes, $\Delta = 0$ vs frozen `v0.9.5-classical-enhanced` control).
     * **Status:** **Complete**.
-  - **Phase 7-C (Automated Tuning - Texel Tuner):** Offline Texel Tuning implementation in `tools/` optimizing positional evaluation weights against grandmaster game datasets.
+  - **Phase 7-C (Dual-Perspective Incremental Accumulator):** Implemented 64-byte aligned dual-perspective accumulator structures (`AccumulatorHalf`, `Accumulator`) and an incremental accumulator stack (`AccumulatorStack`, capacity 128) directly consuming Phase 7-B feature transition deltas.
+    * **Contract & Verification:** Verified full rebuild oracle ($A_{\text{incremental}} \equiv A_{\text{rebuild}}$ bit-for-bit) across quiet moves, normal captures, all 16 promotion variants, 4 castling paths, and en-passant. Verified Per-Perspective King Rule ($\text{RebuildPerspective}(c) \iff K_c^{\text{before}} \ne K_c^{\text{after}}$) ensuring moving king perspective rebuilds from scratch while non-moving king perspective updates incrementally via feature deltas.
+    * **Arithmetic Safety & Stack Lifecycle:** Intermediate accumulator calculations strictly executed in `int32_t` with explicit, range-safe narrowing to `int16_t`; bounded test weights eliminate signed overflow UB. Multi-ply reversible random walks confirmed push/pop correctness with bit-exact root accumulator and position state restoration. Suite #30 passed 10/10 acceptance gates.
+    * **Architectural Invariant:** Standalone evaluation infrastructure; zero modifications to `Position`, `Search`, `SearchStack`, `MovePicker`, `ClassicalEvaluator`, or `ParameterRegistry`. Depth-6 isolated benchmark locked at exactly 313,092 nodes ($\Delta = 0$ nodes vs frozen `v0.9.5-classical-enhanced` control). Scalar accumulator/rebuild path established as frozen reference oracle.
+    * **Status:** **Complete**.
+  - **Phase 7-D (Scalar NNUE Evaluation Primitives & Network Representation):** Implementation of feed-forward network topology ($1024 \to 32 \to 32 \to 1$), quantized integer activation clipping (Clipped ReLU), weight storage representations, and scalar inference reference path.
+  - **Phase 7-E (Automated Tuning - Texel Tuner):** Offline Texel Tuning implementation in `tools/` optimizing evaluation weights against grandmaster game datasets.
 - **Exit Criteria:** Statistically significant Elo gain against baseline in fixed-depth SPRT matches.
-- **Status:** In Progress (Phases 7-A & 7-B Complete).
+- **Status:** In Progress (Phases 7-A, 7-B, & 7-C Complete).
 
 ---
 

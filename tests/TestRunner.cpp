@@ -12,6 +12,8 @@
 #include "eval/ClassicalEvaluator.hpp"
 #include "eval/nnue/NNUETypes.hpp"
 #include "eval/nnue/FeatureTransformer.hpp"
+#include "eval/nnue/Accumulator.hpp"
+#include "eval/nnue/AccumulatorStack.hpp"
 #include "board/Position.hpp"
 #include "board/Castling.hpp"
 #include "board/Move.hpp"
@@ -6524,6 +6526,590 @@ bool runPhase7BFeatureTransformerTests() {
     return (passed == total);
 }
 
+// ---------------------------------------------------------------------------
+// Suite #30: Phase 7-C Dual-Perspective Incremental Accumulator Tests
+// ---------------------------------------------------------------------------
+
+bool testGate7C_1_InitialConstruction() {
+    using namespace eval::nnue;
+    auto weights = FeatureWeights::createDeterministic(42);
+    if (!weights) return false;
+
+    const std::string fens[] = {
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+        "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+        "2rr2k1/1p3ppp/3p4/p2Np3/1PP1P3/2K2P2/P3q1PP/3R3R b - - 0 1",
+        "8/8/4k3/4p3/4P3/4K3/8/8 w - - 0 1"
+    };
+
+    AccumulatorStack stack;
+
+    for (const auto& fen : fens) {
+        auto opt = FenParser::parse(fen);
+        if (!opt) return false;
+        const Position& pos = *opt;
+
+        stack.reset(pos, *weights);
+
+        for (Color c : {Color::White, Color::Black}) {
+            auto feats = FeatureTransformer::getActiveFeatures(pos, c);
+            const auto& half = stack.top().get(c);
+
+            for (size_t i = 0; i < ACCUMULATOR_SIZE; ++i) {
+                int32_t expected = weights->biases[i];
+                for (int f : feats) {
+                    expected += weights->weights[static_cast<size_t>(f)][i];
+                }
+                if (half.values[i] != static_cast<int16_t>(expected)) {
+                    std::cerr << "[FAIL] Gate 7-C-1: Mismatch at index " << i << "\n";
+                    return false;
+                }
+            }
+        }
+    }
+    return true;
+}
+
+bool testGate7C_2_QuietMoves() {
+    using namespace eval::nnue;
+    auto weights = FeatureWeights::createDeterministic(42);
+    if (!weights) return false;
+
+    const std::pair<std::string, Move> tests[] = {
+        {"rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+         Move(Square::E2, Square::E4, Move::Flags::DoublePawnPush)},
+        {"rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+         Move(Square::G1, Square::F3)},
+        {"rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 1",
+         Move(Square::C1, Square::E3)},
+        {"r1bqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+         Move(Square::A1, Square::B1)},
+        {"rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 1",
+         Move(Square::D1, Square::F3)},
+        {"rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 1",
+         Move(Square::E1, Square::E2)},
+        {"rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1",
+         Move(Square::E8, Square::E7)},
+        {"rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1",
+         Move(Square::E7, Square::E5, Move::Flags::DoublePawnPush)}
+    };
+
+    AccumulatorStack stack;
+
+    for (const auto& [fen, move] : tests) {
+        auto opt = FenParser::parse(fen);
+        if (!opt) return false;
+        Position before = *opt;
+        Position after = before;
+        UndoState undo;
+        MoveExecutor::makeMove(after, move, undo);
+
+        stack.reset(before, *weights);
+        stack.pushMove(before, after, move, *weights);
+
+        Accumulator expected;
+        AccumulatorStack::rebuildPerspective(expected.white, after, Color::White, *weights);
+        AccumulatorStack::rebuildPerspective(expected.black, after, Color::Black, *weights);
+
+        if (stack.top() != expected) {
+            std::cerr << "[FAIL] Gate 7-C-2: Quiet move accumulator mismatch\n";
+            return false;
+        }
+    }
+    return true;
+}
+
+bool testGate7C_3_NormalCaptures() {
+    using namespace eval::nnue;
+    auto weights = FeatureWeights::createDeterministic(42);
+    if (!weights) return false;
+
+    const std::pair<std::string, Move> tests[] = {
+        {"rnbqkbnr/ppp1pppp/8/3p4/4P3/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 2",
+         Move(Square::E4, Square::D5)},
+        {"rnbqkb1r/pppp1ppp/5n2/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3",
+         Move(Square::F3, Square::E5)},
+        {"r1bqk2r/pppp1ppp/2n5/2b1p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4",
+         Move(Square::C4, Square::F7)},
+        {"r1bqk2r/pppp1ppp/8/8/8/8/PPP2PPP/RNBQK2R w KQkq - 0 1",
+         Move(Square::D1, Square::D8)},
+        {"rnbqk1nr/pppp1ppp/8/8/8/8/PPPP1bPP/RNBQKBNR w KQkq - 0 1",
+         Move(Square::E1, Square::F2)},
+        {"rnbQkbnr/pppp1ppp/8/8/8/8/PPPP1PPP/RNB1KBNR b KQkq - 0 1",
+         Move(Square::E8, Square::D8)}
+    };
+
+    AccumulatorStack stack;
+
+    for (const auto& [fen, move] : tests) {
+        auto opt = FenParser::parse(fen);
+        if (!opt) return false;
+        Position before = *opt;
+        Position after = before;
+        UndoState undo;
+        MoveExecutor::makeMove(after, move, undo);
+
+        stack.reset(before, *weights);
+        stack.pushMove(before, after, move, *weights);
+
+        Accumulator expected;
+        AccumulatorStack::rebuildPerspective(expected.white, after, Color::White, *weights);
+        AccumulatorStack::rebuildPerspective(expected.black, after, Color::Black, *weights);
+
+        if (stack.top() != expected) {
+            std::cerr << "[FAIL] Gate 7-C-3: Capture accumulator mismatch\n";
+            return false;
+        }
+    }
+    return true;
+}
+
+bool testGate7C_4_All16Promotions() {
+    using namespace eval::nnue;
+    auto weights = FeatureWeights::createDeterministic(42);
+    if (!weights) return false;
+
+    const std::string whiteFen = "3r3k/4P3/8/8/8/8/8/7K w - - 0 1";
+    auto optW = FenParser::parse(whiteFen);
+    if (!optW) return false;
+    Position whiteBefore = *optW;
+
+    const Move::PromotionPiece promoPieces[4] = {
+        Move::PromotionPiece::Queen,
+        Move::PromotionPiece::Rook,
+        Move::PromotionPiece::Bishop,
+        Move::PromotionPiece::Knight
+    };
+
+    AccumulatorStack stack;
+
+    for (Move::PromotionPiece p : promoPieces) {
+        Move m(Square::E7, Square::E8, Move::Flags::Promotion, p);
+        Position after = whiteBefore;
+        UndoState undo;
+        MoveExecutor::makeMove(after, m, undo);
+
+        stack.reset(whiteBefore, *weights);
+        stack.pushMove(whiteBefore, after, m, *weights);
+
+        Accumulator expected;
+        AccumulatorStack::rebuildPerspective(expected.white, after, Color::White, *weights);
+        AccumulatorStack::rebuildPerspective(expected.black, after, Color::Black, *weights);
+
+        if (stack.top() != expected) {
+            std::cerr << "[FAIL] Gate 7-C-4: White quiet promo mismatch\n";
+            return false;
+        }
+    }
+
+    for (Move::PromotionPiece p : promoPieces) {
+        Move m(Square::E7, Square::D8, Move::Flags::Promotion, p);
+        Position after = whiteBefore;
+        UndoState undo;
+        MoveExecutor::makeMove(after, m, undo);
+
+        stack.reset(whiteBefore, *weights);
+        stack.pushMove(whiteBefore, after, m, *weights);
+
+        Accumulator expected;
+        AccumulatorStack::rebuildPerspective(expected.white, after, Color::White, *weights);
+        AccumulatorStack::rebuildPerspective(expected.black, after, Color::Black, *weights);
+
+        if (stack.top() != expected) {
+            std::cerr << "[FAIL] Gate 7-C-4: White capture promo mismatch\n";
+            return false;
+        }
+    }
+
+    const std::string blackFen = "7k/8/8/8/8/8/4p3/3R3K b - - 0 1";
+    auto optB = FenParser::parse(blackFen);
+    if (!optB) return false;
+    Position blackBefore = *optB;
+
+    for (Move::PromotionPiece p : promoPieces) {
+        Move m(Square::E2, Square::E1, Move::Flags::Promotion, p);
+        Position after = blackBefore;
+        UndoState undo;
+        MoveExecutor::makeMove(after, m, undo);
+
+        stack.reset(blackBefore, *weights);
+        stack.pushMove(blackBefore, after, m, *weights);
+
+        Accumulator expected;
+        AccumulatorStack::rebuildPerspective(expected.white, after, Color::White, *weights);
+        AccumulatorStack::rebuildPerspective(expected.black, after, Color::Black, *weights);
+
+        if (stack.top() != expected) {
+            std::cerr << "[FAIL] Gate 7-C-4: Black quiet promo mismatch\n";
+            return false;
+        }
+    }
+
+    for (Move::PromotionPiece p : promoPieces) {
+        Move m(Square::E2, Square::D1, Move::Flags::Promotion, p);
+        Position after = blackBefore;
+        UndoState undo;
+        MoveExecutor::makeMove(after, m, undo);
+
+        stack.reset(blackBefore, *weights);
+        stack.pushMove(blackBefore, after, m, *weights);
+
+        Accumulator expected;
+        AccumulatorStack::rebuildPerspective(expected.white, after, Color::White, *weights);
+        AccumulatorStack::rebuildPerspective(expected.black, after, Color::Black, *weights);
+
+        if (stack.top() != expected) {
+            std::cerr << "[FAIL] Gate 7-C-4: Black capture promo mismatch\n";
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool testGate7C_5_CastlingPaths() {
+    using namespace eval::nnue;
+    auto weights = FeatureWeights::createDeterministic(42);
+    if (!weights) return false;
+
+    struct CastlingTest {
+        std::string fen;
+        Move move;
+        Color mover;
+        Square kingFrom;
+        Square kingTo;
+    };
+
+    const CastlingTest tests[] = {
+        {"r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1",
+         Move(Square::E1, Square::G1, Move::Flags::Castling),
+         Color::White, Square::E1, Square::G1},
+        {"r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1",
+         Move(Square::E1, Square::C1, Move::Flags::Castling),
+         Color::White, Square::E1, Square::C1},
+        {"r3k2r/8/8/8/8/8/8/R3K2R b KQkq - 0 1",
+         Move(Square::E8, Square::G8, Move::Flags::Castling),
+         Color::Black, Square::E8, Square::G8},
+        {"r3k2r/8/8/8/8/8/8/R3K2R b KQkq - 0 1",
+         Move(Square::E8, Square::C8, Move::Flags::Castling),
+         Color::Black, Square::E8, Square::C8}
+    };
+
+    AccumulatorStack stack;
+
+    for (const auto& t : tests) {
+        auto opt = FenParser::parse(t.fen);
+        if (!opt) return false;
+        Position before = *opt;
+        Position after = before;
+        UndoState undo;
+        MoveExecutor::makeMove(after, t.move, undo);
+
+        Color nonMover = (t.mover == Color::White) ? Color::Black : Color::White;
+
+        if (before.getKingSquare(t.mover) != t.kingFrom || after.getKingSquare(t.mover) != t.kingTo) {
+            std::cerr << "[FAIL] Gate 7-C-5: Mover king square invariant violated\n";
+            return false;
+        }
+        if (before.getKingSquare(nonMover) != after.getKingSquare(nonMover)) {
+            std::cerr << "[FAIL] Gate 7-C-5: Non-mover king moved unexpectedly\n";
+            return false;
+        }
+
+        stack.reset(before, *weights);
+        stack.pushMove(before, after, t.move, *weights);
+
+        Accumulator expected;
+        AccumulatorStack::rebuildPerspective(expected.white, after, Color::White, *weights);
+        AccumulatorStack::rebuildPerspective(expected.black, after, Color::Black, *weights);
+
+        if (stack.top() != expected) {
+            std::cerr << "[FAIL] Gate 7-C-5: Castling accumulator mismatch vs rebuild\n";
+            return false;
+        }
+    }
+    return true;
+}
+
+bool testGate7C_6_EnPassant() {
+    using namespace eval::nnue;
+    auto weights = FeatureWeights::createDeterministic(42);
+    if (!weights) return false;
+
+    const std::string whiteFen = "8/8/8/3Pp3/8/8/8/4K2k w - e6 0 1";
+    auto optW = FenParser::parse(whiteFen);
+    if (!optW) return false;
+    Position whiteBefore = *optW;
+    Position whiteAfter = whiteBefore;
+    UndoState undoW;
+    Move whiteEp(Square::D5, Square::E6, Move::Flags::EnPassant);
+    MoveExecutor::makeMove(whiteAfter, whiteEp, undoW);
+
+    AccumulatorStack stack;
+    stack.reset(whiteBefore, *weights);
+    stack.pushMove(whiteBefore, whiteAfter, whiteEp, *weights);
+
+    Accumulator expectedW;
+    AccumulatorStack::rebuildPerspective(expectedW.white, whiteAfter, Color::White, *weights);
+    AccumulatorStack::rebuildPerspective(expectedW.black, whiteAfter, Color::Black, *weights);
+
+    if (stack.top() != expectedW) {
+        std::cerr << "[FAIL] Gate 7-C-6: White en-passant accumulator mismatch\n";
+        return false;
+    }
+
+    const std::string blackFen = "4K2k/8/8/8/3pP3/8/8/8 b - e3 0 1";
+    auto optB = FenParser::parse(blackFen);
+    if (!optB) return false;
+    Position blackBefore = *optB;
+    Position blackAfter = blackBefore;
+    UndoState undoB;
+    Move blackEp(Square::D4, Square::E3, Move::Flags::EnPassant);
+    MoveExecutor::makeMove(blackAfter, blackEp, undoB);
+
+    stack.reset(blackBefore, *weights);
+    stack.pushMove(blackBefore, blackAfter, blackEp, *weights);
+
+    Accumulator expectedB;
+    AccumulatorStack::rebuildPerspective(expectedB.white, blackAfter, Color::White, *weights);
+    AccumulatorStack::rebuildPerspective(expectedB.black, blackAfter, Color::Black, *weights);
+
+    if (stack.top() != expectedB) {
+        std::cerr << "[FAIL] Gate 7-C-6: Black en-passant accumulator mismatch\n";
+        return false;
+    }
+
+    return true;
+}
+
+bool testGate7C_7_ReversibleRandomWalk() {
+    using namespace eval::nnue;
+    auto weights = FeatureWeights::createDeterministic(42);
+    if (!weights) return false;
+
+    const std::string seeds[] = {
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+        "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+        "2rr2k1/1p3ppp/3p4/p2Np3/1PP1P3/2K2P2/P3q1PP/3R3R b - - 0 1"
+    };
+
+    AccumulatorStack stack;
+    std::mt19937_64 rng(1337);
+
+    for (const auto& fen : seeds) {
+        auto opt = FenParser::parse(fen);
+        if (!opt) return false;
+        Position rootPos = *opt;
+
+        stack.reset(rootPos, *weights);
+        Accumulator rootAccumulator = stack.top();
+
+        std::vector<Position> posHistory;
+        posHistory.push_back(rootPos);
+
+        Position currentPos = rootPos;
+        constexpr size_t TARGET_PLIES = 50;
+
+        for (size_t ply = 0; ply < TARGET_PLIES; ++ply) {
+            MoveList legalMoves;
+            MoveGenerator::generateLegalMoves(currentPos, legalMoves);
+            if (legalMoves.empty()) break;
+
+            std::uniform_int_distribution<size_t> dist(0, legalMoves.size() - 1);
+            Move m = legalMoves[dist(rng)];
+
+            Position nextPos = currentPos;
+            UndoState undo;
+            MoveExecutor::makeMove(nextPos, m, undo);
+
+            stack.pushMove(currentPos, nextPos, m, *weights);
+            posHistory.push_back(nextPos);
+            currentPos = nextPos;
+
+            Accumulator expected;
+            AccumulatorStack::rebuildPerspective(expected.white, currentPos, Color::White, *weights);
+            AccumulatorStack::rebuildPerspective(expected.black, currentPos, Color::Black, *weights);
+
+            if (stack.top() != expected) {
+                std::cerr << "[FAIL] Gate 7-C-7: Intermediate accumulator mismatch at ply " << stack.currentPly() << "\n";
+                return false;
+            }
+        }
+
+        while (stack.currentPly() > 0) {
+            Accumulator expected;
+            AccumulatorStack::rebuildPerspective(expected.white, posHistory.back(), Color::White, *weights);
+            AccumulatorStack::rebuildPerspective(expected.black, posHistory.back(), Color::Black, *weights);
+
+            if (stack.top() != expected) {
+                std::cerr << "[FAIL] Gate 7-C-7: Unwind accumulator mismatch at ply " << stack.currentPly() << "\n";
+                return false;
+            }
+
+            stack.pop();
+            posHistory.pop_back();
+        }
+
+        if (stack.currentPly() != 0) {
+            std::cerr << "[FAIL] Gate 7-C-7: Current ply after unwind is " << stack.currentPly() << " != 0\n";
+            return false;
+        }
+        if (stack.top() != rootAccumulator) {
+            std::cerr << "[FAIL] Gate 7-C-7: Root accumulator identity violated after unwind\n";
+            return false;
+        }
+        if (posHistory.size() != 1) {
+            std::cerr << "[FAIL] Gate 7-C-7: Root position history size != 1\n";
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool testGate7C_8_DualPerspectiveSimultaneousInvariance() {
+    using namespace eval::nnue;
+    auto weights = FeatureWeights::createDeterministic(42);
+    if (!weights) return false;
+
+    AccumulatorStack stack;
+
+    auto optStart = FenParser::parse("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+    if (!optStart) return false;
+    stack.reset(*optStart, *weights);
+
+    if (stack.top().white != stack.top().black) {
+        std::cerr << "[FAIL] Gate 7-C-8: Symmetry mismatch at startpos\n";
+        return false;
+    }
+
+    Position pos = *optStart;
+    const Move line[] = {
+        Move(Square::E2, Square::E4, Move::Flags::DoublePawnPush),
+        Move(Square::E7, Square::E5, Move::Flags::DoublePawnPush),
+        Move(Square::G1, Square::F3),
+        Move(Square::B8, Square::C6)
+    };
+
+    for (const auto& m : line) {
+        Position nextPos = pos;
+        UndoState undo;
+        MoveExecutor::makeMove(nextPos, m, undo);
+
+        stack.pushMove(pos, nextPos, m, *weights);
+
+        Accumulator expected;
+        AccumulatorStack::rebuildPerspective(expected.white, nextPos, Color::White, *weights);
+        AccumulatorStack::rebuildPerspective(expected.black, nextPos, Color::Black, *weights);
+
+        if (stack.top().white != expected.white || stack.top().black != expected.black) {
+            std::cerr << "[FAIL] Gate 7-C-8: Simultaneous dual-perspective mismatch\n";
+            return false;
+        }
+
+        pos = nextPos;
+    }
+
+    return true;
+}
+
+bool testGate7C_9_IsolationAudit() {
+    using namespace eval::nnue;
+
+    auto opt = FenParser::parse("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+    if (!opt) return false;
+    int eval1 = Evaluator::evaluate(*opt);
+    eval::ClassicalEvaluator classicalEval;
+    int eval2 = classicalEval.evaluate(*opt);
+    if (eval1 != eval2) {
+        std::cerr << "[FAIL] Gate 7-C-9: ClassicalEvaluator output mismatch\n";
+        return false;
+    }
+
+    auto& reg = ParameterRegistry::getInstance();
+    if (reg.hasParam("Eval_Mode") || reg.hasParam("Use_NNUE") || reg.hasParam("Accumulator")) {
+        std::cerr << "[FAIL] Gate 7-C-9: ParameterRegistry contaminated\n";
+        return false;
+    }
+
+    return true;
+}
+
+bool testGate7C_10_BenchmarkInvariance() {
+    auto& reg = ParameterRegistry::getInstance();
+    reg.resetToDefaults();
+    reg.syncToEngineParameters(SearchController::getInstance().getMutableParams());
+
+    BenchmarkConfig cfg;
+    cfg.overrideDepth = 6;
+    cfg.hashSizeMb = 16;
+    cfg.mode = BenchmarkStateMode::Isolated;
+    cfg.silentSearch = true;
+    cfg.printConsole = false;
+
+    BenchmarkRunRecord rec = BenchmarkRunner::run(cfg);
+    if (rec.aggregate.totalNodes != 313092) {
+        std::cerr << "[FAIL] Gate 7-C-10: Benchmark depth-6 nodes " << rec.aggregate.totalNodes << " != 313092\n";
+        return false;
+    }
+    return true;
+}
+
+bool runPhase7CAccumulatorTests() {
+    std::cout << "\n=================================================================\n";
+    std::cout << "===  MILESTONE OMEGA, PHASE 7-C: INCREMENTAL ACCUMULATOR TESTS===\n";
+    std::cout << "=================================================================\n";
+
+    int passed = 0;
+    int total = 10;
+
+    bool pass1 = testGate7C_1_InitialConstruction();
+    std::cout << "[" << (pass1 ? "PASS" : "FAIL") << "] Gate 7-C-1: Initial Construction (Bias + Sum(Weights) across FENs)\n";
+    if (pass1) passed++;
+
+    bool pass2 = testGate7C_2_QuietMoves();
+    std::cout << "[" << (pass2 ? "PASS" : "FAIL") << "] Gate 7-C-2: Quiet Moves Incremental vs Rebuild Bit-Exact Equivalence\n";
+    if (pass2) passed++;
+
+    bool pass3 = testGate7C_3_NormalCaptures();
+    std::cout << "[" << (pass3 ? "PASS" : "FAIL") << "] Gate 7-C-3: Normal Captures Incremental vs Rebuild Bit-Exact Equivalence\n";
+    if (pass3) passed++;
+
+    bool pass4 = testGate7C_4_All16Promotions();
+    std::cout << "[" << (pass4 ? "PASS" : "FAIL") << "] Gate 7-C-4: All 16 Promotion Variants (Quiet/Capture x Q, R, B, N) Match Rebuild\n";
+    if (pass4) passed++;
+
+    bool pass5 = testGate7C_5_CastlingPaths();
+    std::cout << "[" << (pass5 ? "PASS" : "FAIL") << "] Gate 7-C-5: Castling Paths (Mover Rebuild, Non-Mover Incremental, Bit-Exact)\n";
+    if (pass5) passed++;
+
+    bool pass6 = testGate7C_6_EnPassant();
+    std::cout << "[" << (pass6 ? "PASS" : "FAIL") << "] Gate 7-C-6: En-Passant Incremental vs Rebuild Bit-Exact Equivalence\n";
+    if (pass6) passed++;
+
+    bool pass7 = testGate7C_7_ReversibleRandomWalk();
+    std::cout << "[" << (pass7 ? "PASS" : "FAIL") << "] Gate 7-C-7: Reversible Random Walk (Push/Pop Sequences & Root Unwind Identity)\n";
+    if (pass7) passed++;
+
+    bool pass8 = testGate7C_8_DualPerspectiveSimultaneousInvariance();
+    std::cout << "[" << (pass8 ? "PASS" : "FAIL") << "] Gate 7-C-8: Dual-Perspective Simultaneous Invariance on All Operations\n";
+    if (pass8) passed++;
+
+    bool pass9 = testGate7C_9_IsolationAudit();
+    std::cout << "[" << (pass9 ? "PASS" : "FAIL") << "] Gate 7-C-9: Isolation Audit (Position, Search, ClassicalEvaluator Untouched)\n";
+    if (pass9) passed++;
+
+    bool pass10 = testGate7C_10_BenchmarkInvariance();
+    std::cout << "[" << (pass10 ? "PASS" : "FAIL") << "] Gate 7-C-10: Classical Depth-6 Benchmark Produces Exactly 313,092 Nodes\n";
+    if (pass10) passed++;
+
+    std::cout << "\n=================================================================\n";
+    std::cout << "PHASE 7-C INCREMENTAL ACCUMULATOR RESULT: " << passed << "/" << total << " Gates Passed.\n";
+    std::cout << "=================================================================\n";
+
+    return (passed == total);
+}
+
 bool runOperationalSmokeMatch20Games() {
     std::cout << "\n=================================================================\n";
     std::cout << "===   RUNNING 20-GAME COLOR-BALANCED STRENGTH SMOKE MATCH     ===\n";
@@ -6660,6 +7246,7 @@ int main(int argc, char* argv[]) {
     bool phase65DSuccess = Boson::runPhase65DImprovingHeuristicTests();
     bool phase7ASuccess = Boson::runPhase7AEvaluationAbstractionTests();
     bool phase7BSuccess = Boson::runPhase7BFeatureTransformerTests();
+    bool phase7CSuccess = Boson::runPhase7CAccumulatorTests();
     bool smokeMatchSuccess = Boson::runOperationalSmokeMatch20Games();
     Boson::runDiagnostics();
     std::cout << "\n=== TEST SUITE RESULTS ===\n"
@@ -6691,7 +7278,8 @@ int main(int argc, char* argv[]) {
               << "phase65D: " << phase65DSuccess << "\n"
               << "phase7A: " << phase7ASuccess << "\n"
               << "phase7B: " << phase7BSuccess << "\n"
+              << "phase7C: " << phase7CSuccess << "\n"
               << "smokeMatch: " << smokeMatchSuccess << "\n"
               << "==========================\n";
-    return (m1Phase2Success && m1Module13Success && m2PhasesBCSuccess && m2PerftSuccess && phaseYZSuccess && phaseAASuccess && phaseABSuccess && m6Phase12Success && m6Module63Success && m6Module64Success && m6Module65Success && m6Module66Success && m6Module67Success && m6Module68Success && m6Module69Success && m6Module610Success && omegaPhase1Success && omegaPhase2Success && omegaPhase3Success && omegaPhase4Success && omegaPhase5Success && omegaPhase6Success && phase65ASuccess && phase65BSuccess && phase65CSuccess && phase65DSuccess && phase7ASuccess && phase7BSuccess && smokeMatchSuccess) ? 0 : 1;
+    return (m1Phase2Success && m1Module13Success && m2PhasesBCSuccess && m2PerftSuccess && phaseYZSuccess && phaseAASuccess && phaseABSuccess && m6Phase12Success && m6Module63Success && m6Module64Success && m6Module65Success && m6Module66Success && m6Module67Success && m6Module68Success && m6Module69Success && m6Module610Success && omegaPhase1Success && omegaPhase2Success && omegaPhase3Success && omegaPhase4Success && omegaPhase5Success && omegaPhase6Success && phase65ASuccess && phase65BSuccess && phase65CSuccess && phase65DSuccess && phase7ASuccess && phase7BSuccess && phase7CSuccess && smokeMatchSuccess) ? 0 : 1;
 }
