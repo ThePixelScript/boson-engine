@@ -123,19 +123,20 @@ This document outlines the architectural roadmap for the Boson chess engine, tra
   - **Phase 6.5-D (The Improving Heuristic - LMR-Only Modulation):** Search stack dynamic evaluation tracking ($staticEval > ss[ply - 2].staticEval$) modulating quiet late-move reductions ($r \leftarrow baseReduction + 1$ when improving, $r \leftarrow \max(0, baseReduction - 1)$ when non-improving; safety clamped to $r \le \text{depth} - 2$).
 - **Benchmark Result:** Depth-6 isolated benchmark produces **313,092 nodes** (+51.2% vs Phase 6.5-C baseline of 207,068 nodes, reflecting deeper search on non-improving lines).
 - **Strength Validation:** 100-game color-balanced match at 50ms/move: 50.0 / 100 (+13 =74 -13, $\Delta\text{Elo} = 0.0 \pm 67.7$ at 95% CI; SPRT LLR: -0.04), noting no statistically significant strength effect detected at 50ms movetime.
-- **Status:** **Complete**. Phase 6.5 classical search enhancements are concluded, pending formal freeze tag (`v0.9.5-classical-enhanced`).
+- **Status:** **Complete**. Formally tagged and frozen at `v0.9.5-classical-enhanced`.
 
 ---
 
 ## Milestone 7: Positional Evaluation & Automated Tuning
-- **Scope:** Expand positional knowledge and automate parameter optimization.
-- **Key Deliverables:**
-  - Tapered evaluation interpolating smoothly between opening, middlegame, and endgame phases.
-  - Pawn structure terms: passed pawns, isolated pawns, doubled pawns, backward pawns, candidate passers.
-  - Positional terms: piece mobility, open/semi-open files, outpost squares, king safety attack zones.
-  - Offline Texel Tuning implementation in `tools/` to optimize evaluation weights against grandmaster game datasets.
+- **Scope:** Expand positional knowledge, abstract evaluation architecture, and automate parameter optimization.
+- **Phases:**
+  - **Phase 7-A (Evaluation Abstraction):** Decouple search engine core from concrete evaluation logic via an abstract polymorphic interface (`boson::eval::IEvaluator`) and concrete adapter (`boson::eval::ClassicalEvaluator`).
+    * **Architectural Invariant:** Search is fully decoupled behind `IEvaluator` dynamic dispatch; zero `ParameterRegistry` or UCI mutations; exact bit-for-bit depth-6 benchmark node parity (313,092 nodes == 313,092 nodes, $\Delta = 0$ nodes vs frozen `v0.9.5-classical-enhanced` control).
+    * **Status:** **Complete**.
+  - **Phase 7-B (Positional Terms & Tapered Evaluation):** Tapered evaluation interpolating smoothly between opening, middlegame, and endgame phases. Pawn structure terms (passed, isolated, doubled, backward), piece mobility, open/semi-open files, outpost squares, and king safety zones.
+  - **Phase 7-C (Automated Tuning - Texel Tuner):** Offline Texel Tuning implementation in `tools/` optimizing positional evaluation weights against grandmaster game datasets.
 - **Exit Criteria:** Statistically significant Elo gain against baseline in fixed-depth SPRT matches.
-- **Status:** Planned.
+- **Status:** In Progress (Phase 7-A Complete).
 
 ---
 

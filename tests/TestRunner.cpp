@@ -6,6 +6,10 @@
 #include <iomanip>
 #include <type_traits>
 #include <utility>
+#include <random>
+#include <memory>
+#include "eval/IEvaluator.hpp"
+#include "eval/ClassicalEvaluator.hpp"
 #include "board/Position.hpp"
 #include "board/Castling.hpp"
 #include "board/Move.hpp"
@@ -5869,6 +5873,202 @@ bool runPhase65DImprovingHeuristicTests() {
     return (passed == total);
 }
 
+bool testGate7A_1_FunctionalEquivalence() {
+    eval::ClassicalEvaluator evaluator;
+
+    const std::pair<std::string, std::string> canonicalPositions[] = {
+        {"startpos", "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"},
+        {"kiwipete", "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1"},
+        {"tactical_wac001", "2rr2k1/1p3ppp/3p4/p2Np3/1PP1P3/2K2P2/P3q1PP/3R3R b - - 0 1"},
+        {"positional_closed", "r2q1rk1/pp1b1ppp/2n1pn2/2pp4/2PP4/2NBPN2/PP3PPP/R1BQ1RK1 w - - 0 8"},
+        {"positional_closed_alt", "r1bq1rk1/pp2bppp/2n1pn2/2pp4/2PP4/2N1PN2/PP2BPPP/R1BQ1RK1 w - - 0 1"}
+    };
+
+    for (const auto& [name, fen] : canonicalPositions) {
+        auto opt = FenParser::parse(fen);
+        if (!opt) {
+            std::cerr << "[FAIL] Phase 7-A Test 1: Failed to parse canonical FEN for " << name << "\n";
+            return false;
+        }
+        int evalScore = evaluator.evaluate(*opt);
+        int directScore = Evaluation::evaluate(*opt);
+        if (evalScore != directScore) {
+            std::cerr << "[FAIL] Phase 7-A Test 1: Score mismatch on " << name
+                      << " (evaluator=" << evalScore << ", direct=" << directScore << ")\n";
+            return false;
+        }
+    }
+
+    // 50 random reachable positions via deterministic pseudo-random walks
+    std::mt19937 rng(1337);
+    int checkedPositions = 0;
+
+    const std::string seeds[] = {
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+        "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1"
+    };
+
+    for (const auto& seedFen : seeds) {
+        auto opt = FenParser::parse(seedFen);
+        if (!opt) return false;
+        Position pos = *opt;
+
+        for (int step = 0; step < 50; ++step) {
+            MoveList moves;
+            MoveGenerator::generateLegalMoves(pos, moves);
+            if (moves.size() == 0) {
+                auto resetOpt = FenParser::parse(seedFen);
+                if (!resetOpt) return false;
+                pos = *resetOpt;
+                continue;
+            }
+
+            std::uniform_int_distribution<size_t> dist(0, moves.size() - 1);
+            Move m = moves[dist(rng)];
+            UndoState undo;
+            MoveExecutor::makeMove(pos, m, undo);
+
+            int evalScore = evaluator.evaluate(pos);
+            int directScore = Evaluation::evaluate(pos);
+            if (evalScore != directScore) {
+                std::cerr << "[FAIL] Phase 7-A Test 1: Random walk position score mismatch: "
+                          << evalScore << " != " << directScore << "\n";
+                return false;
+            }
+            checkedPositions++;
+            if (checkedPositions >= 50) break;
+        }
+        if (checkedPositions >= 50) break;
+    }
+
+    if (checkedPositions < 50) {
+        std::cerr << "[FAIL] Phase 7-A Test 1: Checked only " << checkedPositions << " random positions (expected >= 50)\n";
+        return false;
+    }
+
+    return true;
+}
+
+bool testGate7A_2_InterfaceContractAndPolymorphism() {
+    std::unique_ptr<eval::IEvaluator> polyEval = std::make_unique<eval::ClassicalEvaluator>();
+    auto opt = FenParser::parse("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+    if (!opt) return false;
+
+    int polyScore = polyEval->evaluate(*opt);
+    int directScore = Evaluation::evaluate(*opt);
+    if (polyScore != directScore) {
+        std::cerr << "[FAIL] Phase 7-A Test 2: Polymorphic dispatch score mismatch: "
+                  << polyScore << " != " << directScore << "\n";
+        return false;
+    }
+
+    class MockEvaluator final : public eval::IEvaluator {
+    public:
+        int evalCallCount = 0;
+        bool initCalled = false;
+        [[nodiscard]] int evaluate(const Position&) noexcept override {
+            evalCallCount++;
+            return 9999;
+        }
+        void initializeSearch() noexcept override {
+            initCalled = true;
+        }
+    };
+
+    MockEvaluator mock;
+    eval::IEvaluator* originalEvaluator = Search::getEvaluator();
+
+    Search::setEvaluator(&mock);
+    if (Search::getEvaluator() != &mock) {
+        std::cerr << "[FAIL] Phase 7-A Test 2: Search::getEvaluator() != &mock\n";
+        Search::setEvaluator(originalEvaluator);
+        return false;
+    }
+
+    int testScore = Search::evaluate(*opt);
+    if (testScore != 9999 || mock.evalCallCount != 1) {
+        std::cerr << "[FAIL] Phase 7-A Test 2: Mock virtual dispatch failed: score="
+                  << testScore << ", callCount=" << mock.evalCallCount << "\n";
+        Search::setEvaluator(originalEvaluator);
+        return false;
+    }
+
+    Search::getEvaluator()->initializeSearch();
+    if (!mock.initCalled) {
+        std::cerr << "[FAIL] Phase 7-A Test 2: Mock initializeSearch not invoked\n";
+        Search::setEvaluator(originalEvaluator);
+        return false;
+    }
+
+    Search::setEvaluator(nullptr);
+    if (Search::getEvaluator() != &Search::m_defaultEvaluator) {
+        std::cerr << "[FAIL] Phase 7-A Test 2: Search::setEvaluator(nullptr) did not restore m_defaultEvaluator\n";
+        Search::setEvaluator(originalEvaluator);
+        return false;
+    }
+
+    int restoredScore = Search::evaluate(*opt);
+    if (restoredScore != directScore) {
+        std::cerr << "[FAIL] Phase 7-A Test 2: Restored default evaluator score mismatch: "
+                  << restoredScore << " != " << directScore << "\n";
+        Search::setEvaluator(originalEvaluator);
+        return false;
+    }
+
+    Search::setEvaluator(originalEvaluator);
+    return true;
+}
+
+bool testGate7A_3_SearchTreeNodeInvariance() {
+    auto& reg = ParameterRegistry::getInstance();
+    reg.resetToDefaults();
+    reg.syncToEngineParameters(SearchController::getInstance().getMutableParams());
+
+    BenchmarkConfig cfg;
+    cfg.overrideDepth = 6;
+    cfg.hashSizeMb = 16;
+    cfg.mode = BenchmarkStateMode::Isolated;
+    cfg.silentSearch = true;
+    cfg.printConsole = false;
+
+    BenchmarkRunRecord rec = BenchmarkRunner::run(cfg);
+
+    if (rec.aggregate.totalNodes != 313092) {
+        std::cerr << "[FAIL] Phase 7-A Test 3: Benchmark depth-6 node count "
+                  << rec.aggregate.totalNodes << " != 313092\n";
+        return false;
+    }
+
+    return true;
+}
+
+bool runPhase7AEvaluationAbstractionTests() {
+    std::cout << "\n=================================================================\n";
+    std::cout << "===  MILESTONE OMEGA, PHASE 7-A: EVALUATION ABSTRACTION TESTS ===\n";
+    std::cout << "=================================================================\n";
+
+    int passed = 0;
+    int total = 3;
+
+    bool pass1 = testGate7A_1_FunctionalEquivalence();
+    std::cout << "[" << (pass1 ? "PASS" : "FAIL") << "] Phase 7-A Test 1: Functional Equivalence (Canonical & 50 Random Positions)\n";
+    if (pass1) passed++;
+
+    bool pass2 = testGate7A_2_InterfaceContractAndPolymorphism();
+    std::cout << "[" << (pass2 ? "PASS" : "FAIL") << "] Phase 7-A Test 2: Interface Contract & Polymorphism (Virtual Dispatch & Swapping)\n";
+    if (pass2) passed++;
+
+    bool pass3 = testGate7A_3_SearchTreeNodeInvariance();
+    std::cout << "[" << (pass3 ? "PASS" : "FAIL") << "] Phase 7-A Test 3: Search Tree Node Invariance (Depth 6 == 313,092 Nodes)\n";
+    if (pass3) passed++;
+
+    std::cout << "\n=================================================================\n";
+    std::cout << "PHASE 7-A EVAL ABSTRACTION RESULT: " << passed << "/" << total << " Test Categories Passed.\n";
+    std::cout << "=================================================================\n";
+
+    return (passed == total);
+}
+
 bool runOperationalSmokeMatch20Games() {
     std::cout << "\n=================================================================\n";
     std::cout << "===   RUNNING 20-GAME COLOR-BALANCED STRENGTH SMOKE MATCH     ===\n";
@@ -6003,6 +6203,7 @@ int main(int argc, char* argv[]) {
     bool phase65BSuccess = Boson::runPhase65BMovePickerTests();
     bool phase65CSuccess = Boson::runPhase65CReverseFutilityPruningTests();
     bool phase65DSuccess = Boson::runPhase65DImprovingHeuristicTests();
+    bool phase7ASuccess = Boson::runPhase7AEvaluationAbstractionTests();
     bool smokeMatchSuccess = Boson::runOperationalSmokeMatch20Games();
     Boson::runDiagnostics();
     std::cout << "\n=== TEST SUITE RESULTS ===\n"
@@ -6032,7 +6233,8 @@ int main(int argc, char* argv[]) {
               << "phase65B: " << phase65BSuccess << "\n"
               << "phase65C: " << phase65CSuccess << "\n"
               << "phase65D: " << phase65DSuccess << "\n"
+              << "phase7A: " << phase7ASuccess << "\n"
               << "smokeMatch: " << smokeMatchSuccess << "\n"
               << "==========================\n";
-    return (m1Phase2Success && m1Module13Success && m2PhasesBCSuccess && m2PerftSuccess && phaseYZSuccess && phaseAASuccess && phaseABSuccess && m6Phase12Success && m6Module63Success && m6Module64Success && m6Module65Success && m6Module66Success && m6Module67Success && m6Module68Success && m6Module69Success && m6Module610Success && omegaPhase1Success && omegaPhase2Success && omegaPhase3Success && omegaPhase4Success && omegaPhase5Success && omegaPhase6Success && phase65ASuccess && phase65BSuccess && phase65CSuccess && phase65DSuccess && smokeMatchSuccess) ? 0 : 1;
+    return (m1Phase2Success && m1Module13Success && m2PhasesBCSuccess && m2PerftSuccess && phaseYZSuccess && phaseAASuccess && phaseABSuccess && m6Phase12Success && m6Module63Success && m6Module64Success && m6Module65Success && m6Module66Success && m6Module67Success && m6Module68Success && m6Module69Success && m6Module610Success && omegaPhase1Success && omegaPhase2Success && omegaPhase3Success && omegaPhase4Success && omegaPhase5Success && omegaPhase6Success && phase65ASuccess && phase65BSuccess && phase65CSuccess && phase65DSuccess && phase7ASuccess && smokeMatchSuccess) ? 0 : 1;
 }

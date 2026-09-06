@@ -25,6 +25,13 @@ private:
     static inline CorrectionHistoryTable s_corrTable{};
 };
 
+using Evaluation = Evaluator;
+
 } // namespace Boson
+
+namespace boson {
+    using Evaluator = Boson::Evaluator;
+    using Evaluation = Boson::Evaluator;
+}
 
 #endif // BOSON_EVALUATOR_HPP

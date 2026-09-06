@@ -8,6 +8,8 @@
 #include "search/ContinuationHistoryTable.hpp" // Include memory layout
 #include "search/PVLine.hpp"
 #include "search/SearchController.hpp"
+#include "eval/IEvaluator.hpp"
+#include "eval/ClassicalEvaluator.hpp"
 #include <array>
 
 namespace Boson {
@@ -55,6 +57,12 @@ public:
     static int quiescence(Position& pos, int alpha, int beta, int ply = 0) noexcept;
     static int evaluate(const Position& pos) noexcept;
     static int negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLine& pv, bool allowNull = true, Move prevMove = Move()) noexcept;
+
+    static void setEvaluator(eval::IEvaluator* evaluator) noexcept;
+    [[nodiscard]] static eval::IEvaluator* getEvaluator() noexcept;
+
+    static eval::ClassicalEvaluator m_defaultEvaluator;
+    static eval::IEvaluator* m_evaluator;
 
     struct StackEntry {
         int staticEval = 0;

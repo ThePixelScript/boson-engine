@@ -20,6 +20,17 @@ std::array<std::array<Move, 2>, 64> Search::s_killerMoves{};
 std::array<std::array<uint32_t, 64>, 12> Search::s_historyTable{};
 std::array<Search::StackEntry, 128> Search::s_searchStack{};
 
+eval::ClassicalEvaluator Search::m_defaultEvaluator{};
+eval::IEvaluator* Search::m_evaluator = &Search::m_defaultEvaluator;
+
+void Search::setEvaluator(eval::IEvaluator* evaluator) noexcept {
+    m_evaluator = evaluator ? evaluator : &m_defaultEvaluator;
+}
+
+eval::IEvaluator* Search::getEvaluator() noexcept {
+    return m_evaluator;
+}
+
 uint64_t Search::perft(Position& pos, int depth) noexcept {
     if (depth == 0) return 1ULL;
     MoveList legalMoves;
@@ -57,11 +68,11 @@ void Search::divide(Position& pos, int depth) noexcept {
 }
 
 int Search::evaluate(const Position& pos) noexcept {
-    return Evaluator::evaluate(pos);
+    return m_evaluator->evaluate(pos);
 }
 
 int Search::quiescence(Position& pos, int alpha, int beta, int ply) noexcept {
-    if (ply >= 63) return evaluate(pos);
+    if (ply >= 63) return m_evaluator->evaluate(pos);
 
     auto& controller = SearchController::getInstance();
     auto& stats = controller.getStats();
@@ -77,7 +88,7 @@ int Search::quiescence(Position& pos, int alpha, int beta, int ply) noexcept {
     const bool inCheck = MoveGenerator::inCheck(pos, pos.getSideToMove());
 
     if (!inCheck) {
-        int standPat = evaluate(pos);
+        int standPat = m_evaluator->evaluate(pos);
         if (standPat >= beta) return beta;
         if (standPat > alpha) alpha = standPat;
     }
@@ -178,7 +189,7 @@ int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLi
         }
     }
 
-    int staticEval = evaluate(pos);
+    int staticEval = m_evaluator->evaluate(pos);
     if (ply < 128) {
         s_searchStack[ply].staticEval = staticEval;
         s_searchStack[ply].inCheck = inCheck;
@@ -520,6 +531,9 @@ int Search::runSearch(Position& pos, int maxDepth) noexcept {
 }
 
 int Search::runSearch(Position& pos, const SearchLimits& limits) noexcept {
+    if (m_evaluator) {
+        m_evaluator->initializeSearch();
+    }
     auto& controller = SearchController::getInstance();
     controller.initSearch(limits, pos);
     auto& stats = controller.getStats(); 
