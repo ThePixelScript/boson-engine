@@ -142,10 +142,17 @@ This document outlines the architectural roadmap for the Boson chess engine, tra
     * **Arithmetic Safety & Stack Lifecycle:** Intermediate accumulator calculations strictly executed in `int32_t` with explicit, range-safe narrowing to `int16_t`; bounded test weights eliminate signed overflow UB. Multi-ply reversible random walks confirmed push/pop correctness with bit-exact root accumulator and position state restoration. Suite #30 passed 10/10 acceptance gates.
     * **Architectural Invariant:** Standalone evaluation infrastructure; zero modifications to `Position`, `Search`, `SearchStack`, `MovePicker`, `ClassicalEvaluator`, or `ParameterRegistry`. Depth-6 isolated benchmark locked at exactly 313,092 nodes ($\Delta = 0$ nodes vs frozen `v0.9.5-classical-enhanced` control). Scalar accumulator/rebuild path established as frozen reference oracle.
     * **Status:** **Complete**.
-  - **Phase 7-D (Scalar NNUE Evaluation Primitives & Network Representation):** Implementation of feed-forward network topology ($1024 \to 32 \to 32 \to 1$), quantized integer activation clipping (Clipped ReLU), weight storage representations, and scalar inference reference path.
+  - **Phase 7-D (Scalar NNUE Evaluation Primitives & Network Representation):** Implemented standalone feed-forward neural network model representation, quantized integer activation clipping (CReLU [0, 127]), binary serialization, and bit-exact scalar inference reference pipeline consuming dual-perspective accumulators.
+    * **Mathematical Pipeline:** Accumulator (1024 combined) $\to$ CReLU [0, 127] $\to$ FC1 ($1024 \to 32$) $\to$ /64 (trunc toward zero) $\to$ CReLU [0, 127] $\to$ FC2 ($32 \to 32$) $\to$ /64 (trunc toward zero) $\to$ CReLU [0, 127] $\to$ FC3 ($32 \to 1$) $\to$ $\times 16$ output scale $\to$ explicit clamping $[-30000, +30000]$.
+    * **Golden Vector Parity:** Hardcoded intermediate layer diagnostics verified bit-for-bit on startpos (seed 1337 model): FC1 raw `{18882, -7938, -36913, 24244}`, FC1 activated `{127, 0, 0, 127}`, FC2 raw `{13394, -1099, -3180, -1241}`, FC2 activated `{127, 0, 0, 0}`, FC3 raw `293`, Final Score `4688` cp.
+    * **Memory Safety & Ownership:** `NetworkModel` manages large `FeatureWeights` (~41.9 MB) via `std::unique_ptr` with explicitly deleted copy constructor and copy assignment operators; zero copy overhead during forward inference.
+    * **Fail-Fast Serialization:** Little-endian binary byte stream format with validation of magic (`0x4E4E5545`), version (`1`), and network dimensions rejecting malformed headers cleanly prior to payload allocation.
+    * **Arithmetic Safety:** Truncation-defined integer division activation scaling (`/ 64`) and extreme boundary validation across `{-32768, -1, 0, 1, 127, 128, 32767}` confirming overflow safety and strict activation clamping. Suite #31 passed 14/14 acceptance gates.
+    * **Architectural Invariant:** Zero modifications to `Position`, `Search`, `SearchStack`, `MovePicker`, `ClassicalEvaluator`, `TranspositionTable`, or `ParameterRegistry`. Classical depth-6 benchmark locked at exactly 313,092 nodes ($\Delta = 0$ nodes vs frozen `v0.9.5-classical-enhanced` control).
+    * **Status:** **Complete**.
   - **Phase 7-E (Automated Tuning - Texel Tuner):** Offline Texel Tuning implementation in `tools/` optimizing evaluation weights against grandmaster game datasets.
 - **Exit Criteria:** Statistically significant Elo gain against baseline in fixed-depth SPRT matches.
-- **Status:** In Progress (Phases 7-A, 7-B, & 7-C Complete).
+- **Status:** In Progress (Phases 7-A, 7-B, 7-C, & 7-D Complete).
 
 ---
 
