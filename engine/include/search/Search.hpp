@@ -60,6 +60,10 @@ public:
 
     static void setEvaluator(eval::IEvaluator* evaluator) noexcept;
     [[nodiscard]] static eval::IEvaluator* getEvaluator() noexcept;
+    static void setEvaluatorMode(int mode) noexcept;
+    [[nodiscard]] static int getEvaluatorMode() noexcept;
+    [[nodiscard]] static eval::IEvaluator& getDefaultNNUEEvaluator() noexcept;
+    [[nodiscard]] static eval::ClassicalEvaluator& getDefaultClassicalEvaluator() noexcept { return m_defaultEvaluator; }
 
     static eval::ClassicalEvaluator m_defaultEvaluator;
     static eval::IEvaluator* m_evaluator;

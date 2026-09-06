@@ -8,6 +8,7 @@
 #include "board/MoveGenerator.hpp"
 #include "board/MoveExecutor.hpp"
 #include "board/bitboard.hpp"
+#include "eval/nnue/NNUEEvaluator.hpp"
 #include <iostream>
 #include <algorithm>
 
@@ -23,12 +24,44 @@ std::array<Search::StackEntry, 128> Search::s_searchStack{};
 eval::ClassicalEvaluator Search::m_defaultEvaluator{};
 eval::IEvaluator* Search::m_evaluator = &Search::m_defaultEvaluator;
 
+eval::IEvaluator& Search::getDefaultNNUEEvaluator() noexcept {
+    static eval::nnue::NetworkModel defaultModel = eval::nnue::createSyntheticModel(1337);
+    static eval::nnue::NNUEEvaluator nnueEval(defaultModel);
+    return nnueEval;
+}
+
 void Search::setEvaluator(eval::IEvaluator* evaluator) noexcept {
-    m_evaluator = evaluator ? evaluator : &m_defaultEvaluator;
+    eval::IEvaluator* target = evaluator ? evaluator : &m_defaultEvaluator;
+    if (m_evaluator != target) {
+        m_evaluator = target;
+        s_tt.clear();
+        clearCMH();
+        clearContHist();
+        clearStack();
+        Evaluator::getCorrHist().clear();
+    }
 }
 
 eval::IEvaluator* Search::getEvaluator() noexcept {
     return m_evaluator;
+}
+
+void Search::setEvaluatorMode(int mode) noexcept {
+    if (mode == 1) {
+        if (m_evaluator != &getDefaultNNUEEvaluator()) {
+            setEvaluator(&getDefaultNNUEEvaluator());
+        }
+    } else if (mode == 0) {
+        if (m_evaluator != &m_defaultEvaluator) {
+            setEvaluator(&m_defaultEvaluator);
+        }
+    }
+}
+
+int Search::getEvaluatorMode() noexcept {
+    if (m_evaluator == &getDefaultNNUEEvaluator()) return 1;
+    if (m_evaluator == &m_defaultEvaluator) return 0;
+    return -1;
 }
 
 uint64_t Search::perft(Position& pos, int depth) noexcept {
@@ -84,6 +117,7 @@ int Search::quiescence(Position& pos, int alpha, int beta, int ply) noexcept {
         controller.checkTime();
     }
     if (controller.shouldStop()) return 0;
+    if (ply >= 120) return m_evaluator->evaluate(pos);
 
     const bool inCheck = MoveGenerator::inCheck(pos, pos.getSideToMove());
 
@@ -102,9 +136,12 @@ int Search::quiescence(Position& pos, int alpha, int beta, int ply) noexcept {
         MoveOrderer::scoreAndSortTacticalMoves(pos, moves);
         for (size_t i = 0; i < moves.size(); ++i) {
             UndoState undo;
+            const Position before = pos;
             MoveExecutor::makeMove(pos, moves[i], undo);
+            if (m_evaluator) m_evaluator->notifyMove(before, pos, moves[i]);
             int moveScore = -quiescence(pos, -beta, -alpha, ply + 1);
             MoveExecutor::undoMove(pos, moves[i], undo);
+            if (m_evaluator) m_evaluator->notifyUndo();
 
             if (controller.shouldStop()) return 0;
             if (moveScore >= beta) return beta;
@@ -117,9 +154,12 @@ int Search::quiescence(Position& pos, int alpha, int beta, int ply) noexcept {
         Move move;
         while ((move = picker.nextMove()) != Move::none()) {
             UndoState undo;
+            const Position before = pos;
             MoveExecutor::makeMove(pos, move, undo);
+            if (m_evaluator) m_evaluator->notifyMove(before, pos, move);
             int moveScore = -quiescence(pos, -beta, -alpha, ply + 1);
             MoveExecutor::undoMove(pos, move, undo);
+            if (m_evaluator) m_evaluator->notifyUndo();
 
             if (controller.shouldStop()) return 0;
             if (moveScore >= beta) return beta;
@@ -214,12 +254,15 @@ int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLi
             stats.nullMoveAttempts++;
             
             UndoState nullUndo;
+            const Position beforeNull = pos;
             pos.makeNullMove(nullUndo);
+            if (m_evaluator) m_evaluator->notifyMove(beforeNull, pos, Move());
             
             PVLine nullPv;
             int nullScore = -negamax(pos, depth - 1 - R, -beta, -beta + 1, ply + 1, nullPv, false, Move());
             
             pos.undoNullMove(nullUndo);
+            if (m_evaluator) m_evaluator->notifyUndo();
 
             if (controller.shouldStop()) return 0;
 
@@ -260,7 +303,9 @@ int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLi
                                ((MoveGenerator::getKingAttacks(enemyKingSq) & targetBit) != 0);
 
         UndoState undo;
+        const Position before = pos;
         MoveExecutor::makeMove(pos, m, undo);
+        if (m_evaluator) m_evaluator->notifyMove(before, pos, m);
         movesSearched++;
 
         bool givesCheck = MoveGenerator::inCheck(pos, pos.getSideToMove());
@@ -352,8 +397,15 @@ int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLi
         }
 
         MoveExecutor::undoMove(pos, m, undo);
+        if (m_evaluator) m_evaluator->notifyUndo();
 
-        if (controller.shouldStop()) return 0;
+        if (controller.shouldStop()) {
+            if (ply == 0 && pv.count == 0) {
+                pv.moves[0] = m;
+                pv.count = 1;
+            }
+            return 0;
+        }
 
         if (score > bestScore) {
             bestScore = score;
@@ -531,8 +583,11 @@ int Search::runSearch(Position& pos, int maxDepth) noexcept {
 }
 
 int Search::runSearch(Position& pos, const SearchLimits& limits) noexcept {
+    if (getEvaluatorMode() != -1) {
+        setEvaluatorMode(SearchController::getInstance().getParams().eval.evalMode);
+    }
     if (m_evaluator) {
-        m_evaluator->initializeSearch();
+        m_evaluator->initializeSearch(pos);
     }
     auto& controller = SearchController::getInstance();
     controller.initSearch(limits, pos);
@@ -584,9 +639,11 @@ int Search::runSearch(Position& pos, const SearchLimits& limits) noexcept {
 
     int lastScore = 0;
     PVLine stablePv;
+    PVLine iterationPv;
     int maxDepth = (limits.depth > 0) ? limits.depth : 64;
 
     for (int d = 1; d <= maxDepth; ++d) {
+        iterationPv.count = 0;
         if (controller.getTimeManager().hasTimeLimit()) {
             if (controller.getElapsedTimeMs() >= controller.getTimeManager().getSoftLimit()) {
                 stats.stopReason = StopReason::SoftTimeLimit;
@@ -600,7 +657,6 @@ int Search::runSearch(Position& pos, const SearchLimits& limits) noexcept {
         }
 
         int score = 0;
-        PVLine iterationPv;
 
         if (d >= 2) {
             score = searchWithAspiration(pos, d, lastScore, iterationPv);
@@ -633,6 +689,25 @@ int Search::runSearch(Position& pos, const SearchLimits& limits) noexcept {
                   << " nps " << nps 
                   << " time " << stats.elapsedTimeMs 
                   << " pv" << stats.pvString << std::endl;
+    }
+
+    if (stablePv.count == 0) {
+        if (iterationPv.count > 0) {
+            stablePv = iterationPv;
+        } else {
+            MoveList rootMoves;
+            MoveGenerator::generateLegalMoves(pos, rootMoves);
+            if (!rootMoves.empty()) {
+                stablePv.moves[0] = rootMoves[0];
+                stablePv.count = 1;
+            }
+        }
+        stats.pvLine = stablePv;
+        std::string currentPvStr = "";
+        for (size_t i = 0; i < stablePv.count; ++i) {
+            currentPvStr += " " + stablePv.moves[i].toString();
+        }
+        stats.pvString = currentPvStr;
     }
 
     if (stats.stopReason == StopReason::None) {

@@ -193,6 +193,7 @@ void InProcessUciEngine::sendCommand(std::string_view cmd) {
             limits.depth = 4; // fallback
         }
 
+        m_lastBestMove.clear();
         SearchController::getInstance().setParams(m_params);
 
         {
@@ -205,7 +206,13 @@ void InProcessUciEngine::sendCommand(std::string_view cmd) {
             m_lastBestMove = stats.pvLine.moves[0].toString();
         } else {
             std::stringstream ss(stats.pvString);
-            ss >> m_lastBestMove;
+            if (!(ss >> m_lastBestMove) || m_lastBestMove.empty()) {
+                MoveList legalMoves;
+                MoveGenerator::generateLegalMoves(m_pos, legalMoves);
+                if (!legalMoves.empty()) {
+                    m_lastBestMove = legalMoves[0].toString();
+                }
+            }
         }
         return;
     }

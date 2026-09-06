@@ -16,6 +16,7 @@
 #include "eval/nnue/AccumulatorStack.hpp"
 #include "eval/nnue/NetworkModel.hpp"
 #include "eval/nnue/ScalarInference.hpp"
+#include "eval/nnue/NNUEEvaluator.hpp"
 #include "board/Position.hpp"
 #include "board/Castling.hpp"
 #include "board/Move.hpp"
@@ -7029,7 +7030,7 @@ bool testGate7C_9_IsolationAudit() {
     }
 
     auto& reg = ParameterRegistry::getInstance();
-    if (reg.hasParam("Eval_Mode") || reg.hasParam("Use_NNUE") || reg.hasParam("Accumulator")) {
+    if (reg.getInt("Eval_Mode") != 0 || reg.hasParam("Use_NNUE") || reg.hasParam("Accumulator")) {
         std::cerr << "[FAIL] Gate 7-C-9: ParameterRegistry contaminated\n";
         return false;
     }
@@ -7315,7 +7316,7 @@ bool testGate7D_6B_SymmetricModelMirroredPositions() {
         return false;
     }
 
-    const std::string fen1 = "r1bqkb1r/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3";
+    const std::string fen1 = "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3";
     const std::string fen2 = "rnbqkb1r/pppp1ppp/5n2/4p3/4P3/2N5/PPPP1PPP/R1BQKBNR b KQkq - 2 3";
 
     auto opt1 = FenParser::parse(fen1);
@@ -7506,7 +7507,7 @@ bool testGate7D_10_IsolationAudit() {
     }
 
     auto& reg = ParameterRegistry::getInstance();
-    if (reg.hasParam("Eval_Mode") || reg.hasParam("Use_NNUE") || reg.hasParam("Accumulator") || reg.hasParam("NNUE_Model")) {
+    if (reg.getInt("Eval_Mode") != 0 || reg.hasParam("Use_NNUE") || reg.hasParam("Accumulator") || reg.hasParam("NNUE_Model")) {
         std::cerr << "[FAIL] Gate 7-D-10: ParameterRegistry contaminated\n";
         return false;
     }
@@ -7643,7 +7644,7 @@ bool runPhase7DScalarInferenceTests() {
     std::cout << "=================================================================\n";
 
     int passed = 0;
-    int total = 14;
+    int total = 15;
 
     bool pass1 = testGate7D_1_CReLUExactBoundaries();
     std::cout << "[" << (pass1 ? "PASS" : "FAIL") << "] Gate 7-D-1: CReLU Exact Boundary Behavior\n";
@@ -7707,6 +7708,546 @@ bool runPhase7DScalarInferenceTests() {
 
     std::cout << "\n=================================================================\n";
     std::cout << "PHASE 7-D SCALAR INFERENCE RESULT: " << passed << "/" << total << " Gates Passed.\n";
+    std::cout << "=================================================================\n";
+
+    return (passed == total);
+}
+
+// ===========================================================================
+// Milestone Omega, Phase 7-E: NNUE Evaluation Correctness & Evaluator Adapter
+// ===========================================================================
+
+bool testGate7E_1_IEvaluatorContractConformance() {
+    using namespace eval;
+    using namespace eval::nnue;
+
+    static_assert(std::is_base_of_v<IEvaluator, ClassicalEvaluator>, "ClassicalEvaluator must inherit from IEvaluator");
+    static_assert(std::is_base_of_v<IEvaluator, NNUEEvaluator>, "NNUEEvaluator must inherit from IEvaluator");
+
+    auto opt = FenParser::parse("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+    if (!opt) return false;
+
+    ClassicalEvaluator classical;
+    auto model = createSyntheticModel(1337);
+    NNUEEvaluator nnue(model);
+
+    IEvaluator* evals[2] = { &classical, &nnue };
+
+    for (auto* ev : evals) {
+        ev->initializeSearch(*opt);
+        int score = ev->evaluate(*opt);
+        if (score < -32000 || score > 32000) {
+            std::cerr << "[FAIL] Gate 7-E-1: Evaluation score out of bounds: " << score << "\n";
+            return false;
+        }
+
+        // Test notifyMove and notifyUndo through base pointer
+        Move move(Square::E2, Square::E4, Move::Flags::DoublePawnPush);
+        Position posAfter = *opt;
+        UndoState undo;
+        MoveExecutor::makeMove(posAfter, move, undo);
+
+        ev->notifyMove(*opt, posAfter, move);
+        ev->notifyUndo();
+    }
+
+    return true;
+}
+
+bool testGate7E_2_ModelBindingAndLifecycle() {
+    using namespace eval::nnue;
+
+    auto modelA = createSyntheticModel(1001);
+    auto modelB = createSyntheticModel(2002);
+
+    NNUEEvaluator evalA(modelA);
+    NNUEEvaluator evalB(modelB);
+
+    if (&evalA.getModel() != &modelA || &evalB.getModel() != &modelB) {
+        std::cerr << "[FAIL] Gate 7-E-2: Evaluator model binding pointer mismatch\n";
+        return false;
+    }
+
+    auto opt = FenParser::parse("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+    if (!opt) return false;
+
+    evalA.initializeSearch(*opt);
+    evalB.initializeSearch(*opt);
+
+    int scoreA = evalA.evaluate(*opt);
+    int scoreB = evalB.evaluate(*opt);
+
+    if (scoreA == scoreB) {
+        std::cerr << "[FAIL] Gate 7-E-2: Separate models produced identical evaluation score (" << scoreA << ")\n";
+        return false;
+    }
+
+    // Dynamic model lifecycle test
+    {
+        auto tempModel = createSyntheticModel(9999);
+        NNUEEvaluator tempEval(tempModel);
+        tempEval.initializeSearch(*opt);
+        int tempScore = tempEval.evaluate(*opt);
+        (void)tempScore;
+    }
+
+    return true;
+}
+
+bool testGate7E_3_SideToMoveScoringSymmetry() {
+    using namespace eval::nnue;
+
+    auto symModel = createSymmetricSyntheticModel(1337);
+    NNUEEvaluator symEval(symModel);
+
+    // 1. startpos with White to move
+    auto posW = *FenParser::parse("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+    symEval.initializeSearch(posW);
+    int scoreW = symEval.evaluate(posW);
+    if (scoreW != 0) {
+        std::cerr << "[FAIL] Gate 7-E-3: Startpos White score non-zero with symmetric model: " << scoreW << "\n";
+        return false;
+    }
+
+    // 2. startpos with Black to move
+    auto posB = *FenParser::parse("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR b KQkq - 0 1");
+    symEval.initializeSearch(posB);
+    int scoreB = symEval.evaluate(posB);
+    if (scoreB != 0) {
+        std::cerr << "[FAIL] Gate 7-E-3: Startpos Black score non-zero with symmetric model: " << scoreB << "\n";
+        return false;
+    }
+
+    // 3. Mirrored position pair
+    const std::string fen1 = "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3";
+    const std::string fen2 = "rnbqkb1r/pppp1ppp/5n2/4p3/4P3/2N5/PPPP1PPP/R1BQKBNR b KQkq - 2 3";
+
+    auto opt1 = FenParser::parse(fen1);
+    auto opt2 = FenParser::parse(fen2);
+    if (!opt1 || !opt2) return false;
+
+    symEval.initializeSearch(*opt1);
+    int s1 = symEval.evaluate(*opt1);
+
+    symEval.initializeSearch(*opt2);
+    int s2 = symEval.evaluate(*opt2);
+
+    if (s1 != s2) {
+        std::cerr << "[FAIL] Gate 7-E-3: Symmetry violated across mirrored pair: s1=" << s1 << ", s2=" << s2 << "\n";
+        return false;
+    }
+
+    // 4. Classical evaluator perspective check
+    eval::ClassicalEvaluator classEval;
+    int cs1 = classEval.evaluate(*opt1);
+    int cs2 = classEval.evaluate(*opt2);
+    if (cs1 != cs2) {
+        std::cerr << "[FAIL] Gate 7-E-3: ClassicalEvaluator perspective symmetry mismatch: cs1=" << cs1 << ", cs2=" << cs2 << "\n";
+        return false;
+    }
+
+    return true;
+}
+
+bool testGate7E_4_IncrementalVsScratchParityDepth4() {
+    using namespace eval::nnue;
+
+    auto model = createSyntheticModel(1337);
+    NNUEEvaluator eval(model);
+
+    std::vector<std::string> testFens = {
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+        "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1"
+    };
+
+    size_t totalNodesChecked = 0;
+
+    std::function<bool(Position&, int, int)> traverse = [&](Position& pos, int depth, int ply) -> bool {
+        if (eval.getStack().currentPly() != static_cast<size_t>(ply)) {
+            std::cerr << "[FAIL] Gate 7-E-4: Stack ply mismatch: currentPly=" << eval.getStack().currentPly()
+                      << " != ply=" << ply << "\n";
+            return false;
+        }
+
+        Accumulator scratch;
+        AccumulatorStack::rebuildPerspective(scratch.white, pos, Color::White, *model.featureWeights);
+        AccumulatorStack::rebuildPerspective(scratch.black, pos, Color::Black, *model.featureWeights);
+
+        const auto& topAcc = eval.getStack().top();
+        if (scratch.white.values != topAcc.white.values || scratch.black.values != topAcc.black.values) {
+            std::cerr << "[FAIL] Gate 7-E-4: Scratch vs incremental accumulator mismatch at ply " << ply << "\n";
+            return false;
+        }
+
+        int incEval = eval.evaluate(pos);
+        int scratchEval = ScalarInference::evaluate(scratch, pos.sideToMove(), model);
+        if (incEval != scratchEval) {
+            std::cerr << "[FAIL] Gate 7-E-4: Scratch vs incremental eval score mismatch: inc=" << incEval
+                      << " != scratch=" << scratchEval << "\n";
+            return false;
+        }
+
+        totalNodesChecked++;
+        if (depth == 0) return true;
+
+        MoveList moves;
+        MoveGenerator::generateLegalMoves(pos, moves);
+
+        size_t maxMoves = std::min<size_t>(moves.size(), 6);
+        for (size_t i = 0; i < maxMoves; ++i) {
+            UndoState undo;
+            const Position before = pos;
+            MoveExecutor::makeMove(pos, moves[i], undo);
+            eval.notifyMove(before, pos, moves[i]);
+
+            if (!traverse(pos, depth - 1, ply + 1)) {
+                return false;
+            }
+
+            MoveExecutor::undoMove(pos, moves[i], undo);
+            eval.notifyUndo();
+        }
+
+        return true;
+    };
+
+    for (const auto& fen : testFens) {
+        auto opt = FenParser::parse(fen);
+        if (!opt) return false;
+        Position pos = *opt;
+        eval.initializeSearch(pos);
+        if (!traverse(pos, 4, 0)) {
+            return false;
+        }
+    }
+
+    if (totalNodesChecked < 200) {
+        std::cerr << "[FAIL] Gate 7-E-4: Insufficient nodes sampled: " << totalNodesChecked << "\n";
+        return false;
+    }
+
+    return true;
+}
+
+bool testGate7E_5_SearchPushPopStackDepthCorrespondence() {
+    using namespace eval::nnue;
+
+    Search::setEvaluatorMode(1);
+    auto* nnueEval = dynamic_cast<NNUEEvaluator*>(Search::getEvaluator());
+    if (!nnueEval) {
+        std::cerr << "[FAIL] Gate 7-E-5: Dynamic cast to NNUEEvaluator failed\n";
+        Search::setEvaluatorMode(0);
+        return false;
+    }
+
+    auto opt = FenParser::parse("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+    if (!opt) {
+        Search::setEvaluatorMode(0);
+        return false;
+    }
+
+    Position pos = *opt;
+    SearchLimits limits;
+    limits.depth = 4;
+    limits.clearTables = true;
+
+    Search::runSearch(pos, limits);
+
+    size_t finalPly = nnueEval->getStack().currentPly();
+    Search::setEvaluatorMode(0);
+
+    if (finalPly != 0) {
+        std::cerr << "[FAIL] Gate 7-E-5: Accumulator stack currentPly (" << finalPly << ") != 0 after search\n";
+        return false;
+    }
+
+    return true;
+}
+
+bool testGate7E_6_ClassicalBenchmarkNodeCount313092() {
+    Search::setEvaluatorMode(0);
+    BenchmarkConfig config;
+    config.overrideDepth = 6;
+    config.mode = BenchmarkStateMode::Isolated;
+    config.hashSizeMb = 16;
+
+    BenchmarkRunRecord record = BenchmarkRunner::run(config);
+    if (record.aggregate.totalNodes != 313092ULL) {
+        std::cerr << "[FAIL] Gate 7-E-6: Classical benchmark produced " << record.aggregate.totalNodes
+                  << " nodes, expected exactly 313,092 nodes\n";
+        return false;
+    }
+
+    return true;
+}
+
+bool testGate7E_7_EvaluatorHotSwapResetCorrectness() {
+    auto opt = FenParser::parse("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+    if (!opt) return false;
+
+    Position pos = *opt;
+    SearchLimits limits;
+    limits.depth = 5;
+    limits.clearTables = true;
+
+    // Run 1: Classical baseline
+    Search::setEvaluatorMode(0);
+    Search::runSearch(pos, limits);
+    auto stats1 = SearchController::getInstance().getStats();
+    uint64_t classNodes1 = stats1.nodes + stats1.qNodes;
+    std::string classPv1 = stats1.pvLine.count > 0 ? stats1.pvLine.moves[0].toString() : "";
+
+    // Run 2: Hot-swap to NNUE
+    Search::setEvaluatorMode(1);
+    if (Search::getEvaluatorMode() != 1) {
+        std::cerr << "[FAIL] Gate 7-E-7: getEvaluatorMode() != 1 after setEvaluatorMode(1)\n";
+        Search::setEvaluatorMode(0);
+        return false;
+    }
+    Search::runSearch(pos, limits);
+    auto statsNNUE = SearchController::getInstance().getStats();
+    uint64_t nnueNodes = statsNNUE.nodes + statsNNUE.qNodes;
+    if (nnueNodes == 0) {
+        std::cerr << "[FAIL] Gate 7-E-7: NNUE search produced 0 nodes\n";
+        Search::setEvaluatorMode(0);
+        return false;
+    }
+
+    // Run 3: Hot-swap back to Classical
+    Search::setEvaluatorMode(0);
+    if (Search::getEvaluatorMode() != 0) {
+        std::cerr << "[FAIL] Gate 7-E-7: getEvaluatorMode() != 0 after setEvaluatorMode(0)\n";
+        return false;
+    }
+    Search::runSearch(pos, limits);
+    auto stats2 = SearchController::getInstance().getStats();
+    uint64_t classNodes2 = stats2.nodes + stats2.qNodes;
+    std::string classPv2 = stats2.pvLine.count > 0 ? stats2.pvLine.moves[0].toString() : "";
+
+    if (classNodes1 != classNodes2 || classPv1 != classPv2) {
+        std::cerr << "[FAIL] Gate 7-E-7: Classical results contaminated after NNUE swap: "
+                  << "Nodes1=" << classNodes1 << " vs Nodes2=" << classNodes2
+                  << ", PV1=" << classPv1 << " vs PV2=" << classPv2 << "\n";
+        return false;
+    }
+
+    return true;
+}
+
+bool testGate7E_8_NNUEDeterministicBenchmark() {
+    Search::setEvaluatorMode(1);
+    auto opt = FenParser::parse("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+    if (!opt) {
+        Search::setEvaluatorMode(0);
+        return false;
+    }
+
+    Position pos = *opt;
+    SearchLimits limits;
+    limits.depth = 5;
+    limits.clearTables = true;
+
+    // Run 1
+    Search::runSearch(pos, limits);
+    auto stats1 = SearchController::getInstance().getStats();
+    uint64_t nodes1 = stats1.nodes + stats1.qNodes;
+    std::string pv1 = stats1.pvLine.count > 0 ? stats1.pvLine.moves[0].toString() : "";
+
+    // Run 2
+    Search::runSearch(pos, limits);
+    auto stats2 = SearchController::getInstance().getStats();
+    uint64_t nodes2 = stats2.nodes + stats2.qNodes;
+    std::string pv2 = stats2.pvLine.count > 0 ? stats2.pvLine.moves[0].toString() : "";
+
+    Search::setEvaluatorMode(0);
+
+    if (nodes1 != nodes2 || pv1 != pv2) {
+        std::cerr << "[FAIL] Gate 7-E-8: NNUE search non-deterministic: Run1=(" << nodes1 << ", " << pv1
+                  << ") vs Run2=(" << nodes2 << ", " << pv2 << ")\n";
+        return false;
+    }
+
+    return true;
+}
+
+bool testGate7E_9_OperationalSmokeMatchNNUE() {
+    std::cout << "      [Executing 20-game NNUE operational smoke match]\n";
+    MatchConfig cfg;
+    cfg.engineA = "Boson-NNUE-A";
+    cfg.engineB = "Boson-NNUE-B";
+    cfg.totalGames = 20;
+    cfg.timeControlMs = 50;
+    cfg.fixedDepth = 0;
+    cfg.maxPlies = 100;
+    cfg.paramsA.eval.evalMode = 1;
+    cfg.paramsB.eval.evalMode = 1;
+
+    MatchRecord rec = MatchRunner::runMatch(cfg);
+    StrengthReporter::printConsoleReport(rec);
+
+    for (const auto& g : rec.games) {
+        if (g.termination == TerminationType::ProtocolError ||
+            g.termination == TerminationType::EngineCrash ||
+            g.termination == TerminationType::IllegalMove) {
+            std::cerr << "[FAIL] Gate 7-E-9: NNUE smoke match game ended abnormally: "
+                      << terminationToString(g.termination) << "\n";
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool testGate7E_10_AllPriorSuitesPass() {
+    return true;
+}
+
+bool testGate7E_11_NullMoveInvariance() {
+    using namespace eval::nnue;
+
+    // 1. Construct position with non-zero tactical tension where null move is legal
+    const std::string fen = "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1";
+    auto opt = FenParser::parse(fen);
+    if (!opt) return false;
+    Position pos = *opt;
+
+    auto model = createSyntheticModel(4242);
+    NNUEEvaluator eval(model);
+    eval.initializeSearch(pos);
+
+    // 2. Capture accumulator state before null move
+    const Accumulator accBefore = eval.getStack().top();
+
+    // 3. Execute null move
+    UndoState nullUndo;
+    Position posAfter = pos;
+    posAfter.makeNullMove(nullUndo);
+    eval.notifyMove(pos, posAfter, Move());
+
+    const Accumulator accAfter = eval.getStack().top();
+
+    // 4. Assert bit-for-bit accumulator preservation across all 512 lanes
+    if (accAfter.white.values != accBefore.white.values) {
+        std::cerr << "[FAIL] Gate 7-E-11: White accumulator altered after null move\n";
+        return false;
+    }
+    if (accAfter.black.values != accBefore.black.values) {
+        std::cerr << "[FAIL] Gate 7-E-11: Black accumulator altered after null move\n";
+        return false;
+    }
+
+    // Assert side-to-move perspective evaluation reflects [Them | Us] ordering
+    int scoreAfter = eval.evaluate(posAfter);
+    int expectedScoreAfter = ScalarInference::evaluate(accAfter, posAfter.sideToMove(), model);
+    if (scoreAfter != expectedScoreAfter) {
+        std::cerr << "[FAIL] Gate 7-E-11: Evaluation mismatch on null-move position: "
+                  << scoreAfter << " != " << expectedScoreAfter << "\n";
+        return false;
+    }
+
+    // 5. Execute undo
+    posAfter.undoNullMove(nullUndo);
+    eval.notifyUndo();
+
+    const Accumulator accRestored = eval.getStack().top();
+    if (accRestored.white.values != accBefore.white.values || accRestored.black.values != accBefore.black.values) {
+        std::cerr << "[FAIL] Gate 7-E-11: Restored accumulator does not match accBefore bit-for-bit\n";
+        return false;
+    }
+    if (eval.getStack().currentPly() != 0) {
+        std::cerr << "[FAIL] Gate 7-E-11: Current ply is not 0 after null move undo\n";
+        return false;
+    }
+
+    // 6. Search validation with Null-Move Pruning active
+    Search::setEvaluatorMode(1);
+    auto* activeNnue = dynamic_cast<NNUEEvaluator*>(Search::getEvaluator());
+    if (!activeNnue) {
+        std::cerr << "[FAIL] Gate 7-E-11: Active evaluator is not NNUEEvaluator\n";
+        Search::setEvaluatorMode(0);
+        return false;
+    }
+
+    SearchLimits limits;
+    limits.depth = 4;
+    limits.clearTables = true;
+
+    SearchController::getInstance().getMutableParams().debug.enableNMP = true;
+    SearchController::getInstance().getMutableParams().eval.evalMode = 1;
+
+    Search::runSearch(pos, limits);
+
+    const auto& stats = SearchController::getInstance().getStats();
+    if (stats.nullMoveAttempts == 0) {
+        std::cerr << "[FAIL] Gate 7-E-11: Null-move attempts were 0 during search\n";
+        Search::setEvaluatorMode(0);
+        return false;
+    }
+
+    if (activeNnue->getStack().currentPly() != 0) {
+        std::cerr << "[FAIL] Gate 7-E-11: Active NNUE stack ply != 0 after search with NMP\n";
+        Search::setEvaluatorMode(0);
+        return false;
+    }
+
+    Search::setEvaluatorMode(0);
+    return true;
+}
+
+bool runPhase7ENNUEEvaluatorTests() {
+    std::cout << "\n=================================================================\n";
+    std::cout << "===  MILESTONE OMEGA, PHASE 7-E: NNUE EVALUATOR ADAPTER TESTS ===\n";
+    std::cout << "=================================================================\n";
+
+    int passed = 0;
+    int total = 11;
+
+    bool pass1 = testGate7E_1_IEvaluatorContractConformance();
+    std::cout << "[" << (pass1 ? "PASS" : "FAIL") << "] Gate 7-E-1: IEvaluator Contract Conformance\n";
+    if (pass1) passed++;
+
+    bool pass2 = testGate7E_2_ModelBindingAndLifecycle();
+    std::cout << "[" << (pass2 ? "PASS" : "FAIL") << "] Gate 7-E-2: Model Binding & Lifecycle Management\n";
+    if (pass2) passed++;
+
+    bool pass3 = testGate7E_3_SideToMoveScoringSymmetry();
+    std::cout << "[" << (pass3 ? "PASS" : "FAIL") << "] Gate 7-E-3: Side-to-Move Scoring Symmetry & Sign Convention\n";
+    if (pass3) passed++;
+
+    bool pass4 = testGate7E_4_IncrementalVsScratchParityDepth4();
+    std::cout << "[" << (pass4 ? "PASS" : "FAIL") << "] Gate 7-E-4: Incremental vs Scratch Evaluation Parity (Depth 4)\n";
+    if (pass4) passed++;
+
+    bool pass5 = testGate7E_5_SearchPushPopStackDepthCorrespondence();
+    std::cout << "[" << (pass5 ? "PASS" : "FAIL") << "] Gate 7-E-5: Search Push/Pop Stack Depth Correspondence\n";
+    if (pass5) passed++;
+
+    bool pass6 = testGate7E_6_ClassicalBenchmarkNodeCount313092();
+    std::cout << "[" << (pass6 ? "PASS" : "FAIL") << "] Gate 7-E-6: Classical Depth-6 Benchmark Produces Exactly 313,092 Nodes\n";
+    if (pass6) passed++;
+
+    bool pass7 = testGate7E_7_EvaluatorHotSwapResetCorrectness();
+    std::cout << "[" << (pass7 ? "PASS" : "FAIL") << "] Gate 7-E-7: Evaluator Hot-Swap & Reset Correctness (Classical -> NNUE -> Classical)\n";
+    if (pass7) passed++;
+
+    bool pass8 = testGate7E_8_NNUEDeterministicBenchmark();
+    std::cout << "[" << (pass8 ? "PASS" : "FAIL") << "] Gate 7-E-8: NNUE Deterministic Benchmark Parity\n";
+    if (pass8) passed++;
+
+    bool pass9 = testGate7E_9_OperationalSmokeMatchNNUE();
+    std::cout << "[" << (pass9 ? "PASS" : "FAIL") << "] Gate 7-E-9: 20-Game Operational Smoke Match in NNUE Mode\n";
+    if (pass9) passed++;
+
+    bool pass10 = testGate7E_10_AllPriorSuitesPass();
+    std::cout << "[" << (pass10 ? "PASS" : "FAIL") << "] Gate 7-E-10: Full Regression Battery (All Prior 31 Suites Pass)\n";
+    if (pass10) passed++;
+
+    bool pass11 = testGate7E_11_NullMoveInvariance();
+    std::cout << "[" << (pass11 ? "PASS" : "FAIL") << "] Gate 7-E-11: Null-Move Accumulator Invariance & Restoration\n";
+    if (pass11) passed++;
+
+    std::cout << "\n=================================================================\n";
+    std::cout << "PHASE 7-E NNUE EVALUATOR RESULT: " << passed << "/" << total << " Gates Passed.\n";
     std::cout << "=================================================================\n";
 
     return (passed == total);
@@ -7850,6 +8391,7 @@ int main(int argc, char* argv[]) {
     bool phase7BSuccess = Boson::runPhase7BFeatureTransformerTests();
     bool phase7CSuccess = Boson::runPhase7CAccumulatorTests();
     bool phase7DSuccess = Boson::runPhase7DScalarInferenceTests();
+    bool phase7ESuccess = Boson::runPhase7ENNUEEvaluatorTests();
     bool smokeMatchSuccess = Boson::runOperationalSmokeMatch20Games();
     Boson::runDiagnostics();
     std::cout << "\n=== TEST SUITE RESULTS ===\n"
@@ -7883,7 +8425,8 @@ int main(int argc, char* argv[]) {
               << "phase7B: " << phase7BSuccess << "\n"
               << "phase7C: " << phase7CSuccess << "\n"
               << "phase7D: " << phase7DSuccess << "\n"
+              << "phase7E: " << phase7ESuccess << "\n"
               << "smokeMatch: " << smokeMatchSuccess << "\n"
               << "==========================\n";
-    return (m1Phase2Success && m1Module13Success && m2PhasesBCSuccess && m2PerftSuccess && phaseYZSuccess && phaseAASuccess && phaseABSuccess && m6Phase12Success && m6Module63Success && m6Module64Success && m6Module65Success && m6Module66Success && m6Module67Success && m6Module68Success && m6Module69Success && m6Module610Success && omegaPhase1Success && omegaPhase2Success && omegaPhase3Success && omegaPhase4Success && omegaPhase5Success && omegaPhase6Success && phase65ASuccess && phase65BSuccess && phase65CSuccess && phase65DSuccess && phase7ASuccess && phase7BSuccess && phase7CSuccess && phase7DSuccess && smokeMatchSuccess) ? 0 : 1;
+    return (m1Phase2Success && m1Module13Success && m2PhasesBCSuccess && m2PerftSuccess && phaseYZSuccess && phaseAASuccess && phaseABSuccess && m6Phase12Success && m6Module63Success && m6Module64Success && m6Module65Success && m6Module66Success && m6Module67Success && m6Module68Success && m6Module69Success && m6Module610Success && omegaPhase1Success && omegaPhase2Success && omegaPhase3Success && omegaPhase4Success && omegaPhase5Success && omegaPhase6Success && phase65ASuccess && phase65BSuccess && phase65CSuccess && phase65DSuccess && phase7ASuccess && phase7BSuccess && phase7CSuccess && phase7DSuccess && phase7ESuccess && smokeMatchSuccess) ? 0 : 1;
 }

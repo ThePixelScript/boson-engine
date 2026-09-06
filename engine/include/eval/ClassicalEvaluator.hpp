@@ -12,6 +12,9 @@ public:
 
     [[nodiscard]] int evaluate(const Position& pos) noexcept override;
     void initializeSearch() noexcept override;
+    void initializeSearch(const Position& rootPos) noexcept override;
+    void notifyMove(const Position& before, const Position& after, const Move& move) noexcept override;
+    void notifyUndo() noexcept override;
 };
 
 } // namespace Boson::eval

@@ -76,6 +76,11 @@ void AccumulatorStack::pushMove(const Position& before,
     const Accumulator& prevAcc = m_stack[prevPly];
     Accumulator& currAcc = m_stack[m_currentPly];
 
+    if (move.getRawData() == 0) {
+        currAcc = prevAcc;
+        return;
+    }
+
     for (Color c : {Color::White, Color::Black}) {
         if (before.getKingSquare(c) != after.getKingSquare(c)) {
             // Per-Perspective King Rule:

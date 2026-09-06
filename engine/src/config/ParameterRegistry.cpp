@@ -92,6 +92,9 @@ void ParameterRegistry::registerDefaultParameters() {
     registerParam(ParameterDescriptor::createInt(
         "CorrScaleFactor", "Correction history weight scaling divisor",
         ParamGroup::Evaluation, 256, 1, 2048, ResetRequirement::None));
+    registerParam(ParameterDescriptor::createInt(
+        "Eval_Mode", "Evaluation mode: 0 = Classical, 1 = NNUE",
+        ParamGroup::Evaluation, 0, 0, 1, ResetRequirement::FullReset, true, false));
 
     // 7. Time Management
     registerParam(ParameterDescriptor::createInt(
@@ -225,6 +228,13 @@ bool ParameterRegistry::setParam(std::string_view name, const ParamValue& val) {
         m_resetCallback(desc->resetRequirement, desc->name);
     }
 
+    std::string norm = normalizeName(name);
+    if (norm == "eval_mode") {
+        if (std::holds_alternative<int64_t>(val)) {
+            Search::setEvaluatorMode(static_cast<int>(std::get<int64_t>(val)));
+        }
+    }
+
     syncToEngineParameters(SearchController::getInstance().getMutableParams());
     return true;
 }
@@ -296,6 +306,7 @@ void ParameterRegistry::resetToDefaults() {
     for (auto& p : m_params) {
         p.currentValue = p.defaultValue;
     }
+    Search::setEvaluatorMode(0);
     syncToEngineParameters(SearchController::getInstance().getMutableParams());
 }
 
@@ -319,6 +330,7 @@ void ParameterRegistry::syncToEngineParameters(EngineParameters& params) const {
     params.eval.queenValue = static_cast<int>(getInt("QueenValue"));
     params.eval.maxCorrection = static_cast<int>(getInt("MaxCorrection"));
     params.eval.corrScaleFactor = static_cast<int>(getInt("CorrScaleFactor"));
+    params.eval.evalMode = static_cast<int>(getInt("Eval_Mode"));
 
     params.time.nodeCheckPeriod = static_cast<uint64_t>(getInt("Time_NodeCheckPeriod"));
     params.time.allocDivisor = static_cast<int>(getInt("Time_MoveAllocationDivisor"));
@@ -353,6 +365,7 @@ void ParameterRegistry::loadFromEngineParameters(const EngineParameters& params)
     setParam("QueenValue", static_cast<int64_t>(params.eval.queenValue));
     setParam("MaxCorrection", static_cast<int64_t>(params.eval.maxCorrection));
     setParam("CorrScaleFactor", static_cast<int64_t>(params.eval.corrScaleFactor));
+    setParam("Eval_Mode", static_cast<int64_t>(params.eval.evalMode));
 
     setParam("Time_NodeCheckPeriod", static_cast<int64_t>(params.time.nodeCheckPeriod));
     setParam("Time_MoveAllocationDivisor", static_cast<int64_t>(params.time.allocDivisor));

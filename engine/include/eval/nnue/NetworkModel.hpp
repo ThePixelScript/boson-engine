@@ -35,6 +35,8 @@ struct NetworkModel {
     NetworkModel& operator=(NetworkModel&&) noexcept;
     NetworkModel(const NetworkModel&) = delete;
     NetworkModel& operator=(const NetworkModel&) = delete;
+
+    [[nodiscard]] const FeatureWeights& getWeights() const noexcept { return *featureWeights; }
 };
 
 [[nodiscard]] NetworkModel createSyntheticModel(uint32_t seed);

@@ -32,6 +32,7 @@ public:
     Bitboard getColorOccupancy(Color color) const noexcept { return m_occupancy[static_cast<size_t>(color)]; }
     Bitboard getTotalOccupancy() const noexcept { return m_occupancy[static_cast<size_t>(Color::None)]; }
     Color getSideToMove() const noexcept { return m_sideToMove; }
+    Color sideToMove() const noexcept { return m_sideToMove; }
     Square getEnPassantSquare() const noexcept { return m_enPassantSquare; }
     CastlingRights getCastlingRights() const noexcept { return m_castlingRights; }
     uint16_t getHalfmoveClock() const noexcept { return m_halfmoveClock; }
@@ -88,6 +89,9 @@ public:
 
     Square getKingSquare(Color side) const noexcept {
         return (side == Color::White) ? m_whiteKingSquare : m_blackKingSquare;
+    }
+    Square kingSquare(Color side) const noexcept {
+        return getKingSquare(side);
     }
     void setKingSquare(Color color, Square sq) noexcept;
 

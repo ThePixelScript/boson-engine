@@ -150,9 +150,16 @@ This document outlines the architectural roadmap for the Boson chess engine, tra
     * **Arithmetic Safety:** Truncation-defined integer division activation scaling (`/ 64`) and extreme boundary validation across `{-32768, -1, 0, 1, 127, 128, 32767}` confirming overflow safety and strict activation clamping. Suite #31 passed 14/14 acceptance gates.
     * **Architectural Invariant:** Zero modifications to `Position`, `Search`, `SearchStack`, `MovePicker`, `ClassicalEvaluator`, `TranspositionTable`, or `ParameterRegistry`. Classical depth-6 benchmark locked at exactly 313,092 nodes ($\Delta = 0$ nodes vs frozen `v0.9.5-classical-enhanced` control).
     * **Status:** **Complete**.
-  - **Phase 7-E (Automated Tuning - Texel Tuner):** Offline Texel Tuning implementation in `tools/` optimizing evaluation weights against grandmaster game datasets.
+  - **Phase 7-E (NNUE Evaluator Provider & SearchStack Lifecycle Integration):** Implemented the polymorphic `NNUEEvaluator` provider adhering to `IEvaluator`, integrated explicit search stack lifecycle synchronization hooks, and established UCI hot-swapping via `ParameterRegistry`.
+    * **Universal Scoring Contract:** Strict perspective convention verified across both `ClassicalEvaluator` and `NNUEEvaluator`—`IEvaluator::evaluate(pos)` returns centipawns relative to `pos.sideToMove()`.
+    * **Explicit Search Synchronization Lifecycle:** `IEvaluator` extended with `initializeSearch(rootPos)`, `notifyMove(before, after, move)`, and `notifyUndo()`. In `Search.cpp`, all move execution sites in negamax main loop, null-move pruning, and quiescence search (tactical & move picker loops) synchronize the evaluator stack 1-to-1 without silent fallback rebuilding.
+    * **Null-Move Accumulator Invariance (Gate 7-E-11):** Verified bit-exact accumulator preservation across null moves, [Them | Us] perspective inversion matching side-to-move semantics, and exact undo restoration. Confirmed zero accumulator corruptions during search with null-move pruning enabled.
+    * **Hot-Swapping & Configuration:** Registered `Eval_Mode` (0 = Classical, 1 = NNUE; default 0, `FullReset`) in `ParameterRegistry` exposed via UCI, triggering automatic table flushing on mode transition.
+    * **Operational Readiness:** Completed a 20-game operational smoke match in NNUE mode with 0 crashes, 0 timeouts, and 100% legal moves. Suite #32 passed 11/11 acceptance gates.
+    * **Classical Invariance Oracle:** Depth-6 benchmark locked at exactly **313,092 nodes** (0 node delta vs `v0.9.5-classical-enhanced`).
+    * **Status:** **Complete**.
 - **Exit Criteria:** Statistically significant Elo gain against baseline in fixed-depth SPRT matches.
-- **Status:** In Progress (Phases 7-A, 7-B, 7-C, & 7-D Complete).
+- **Status:** In Progress (Phases 7-A, 7-B, 7-C, 7-D, & 7-E Complete).
 
 ---
 

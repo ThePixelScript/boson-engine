@@ -27,6 +27,7 @@ struct EvaluationParameters {
     int queenValue = 900;
     int maxCorrection = 1024;
     int corrScaleFactor = 256;
+    int evalMode = 0; // 0 = Classical (default), 1 = NNUE
 };
 
 struct TimeParameters {
