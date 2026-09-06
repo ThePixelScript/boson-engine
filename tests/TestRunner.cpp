@@ -10,6 +10,8 @@
 #include <memory>
 #include "eval/IEvaluator.hpp"
 #include "eval/ClassicalEvaluator.hpp"
+#include "eval/nnue/NNUETypes.hpp"
+#include "eval/nnue/FeatureTransformer.hpp"
 #include "board/Position.hpp"
 #include "board/Castling.hpp"
 #include "board/Move.hpp"
@@ -6069,6 +6071,459 @@ bool runPhase7AEvaluationAbstractionTests() {
     return (passed == total);
 }
 
+static bool checkDeltaEquivalence(const Position& before,
+                                  const Position& after,
+                                  const Move& move,
+                                  Color perspective) {
+    std::vector<int> beforeFeats = eval::nnue::FeatureTransformer::getActiveFeatures(before, perspective);
+    std::vector<int> afterFeats = eval::nnue::FeatureTransformer::getActiveFeatures(after, perspective);
+
+    std::vector<int> removed, added;
+    eval::nnue::FeatureTransformer::computeDeltas(before, after, move, perspective, removed, added);
+
+    std::vector<int> reconstructed = beforeFeats;
+    for (int r : removed) {
+        auto it = std::find(reconstructed.begin(), reconstructed.end(), r);
+        if (it == reconstructed.end()) {
+            return false;
+        }
+        reconstructed.erase(it);
+    }
+    for (int a : added) {
+        reconstructed.push_back(a);
+    }
+    std::sort(reconstructed.begin(), reconstructed.end());
+    return reconstructed == afterFeats;
+}
+
+bool testGate7B_1_IndexDomainAndBijectivity() {
+    using namespace eval::nnue;
+    std::vector<bool> seenWhite(HALFKP_FEATURES, false);
+    std::vector<bool> seenBlack(HALFKP_FEATURES, false);
+
+    const Piece testPieces[] = {
+        Piece::WhitePawn, Piece::WhiteKnight, Piece::WhiteBishop, Piece::WhiteRook, Piece::WhiteQueen,
+        Piece::BlackPawn, Piece::BlackKnight, Piece::BlackBishop, Piece::BlackRook, Piece::BlackQueen
+    };
+
+    for (int k = 0; k < 64; ++k) {
+        Square kSq = static_cast<Square>(k);
+        for (Piece p : testPieces) {
+            for (int s = 0; s < 64; ++s) {
+                Square pSq = static_cast<Square>(s);
+
+                int idxW = makeFeatureIndex(kSq, p, pSq, Color::White);
+                if (idxW < 0 || idxW >= HALFKP_FEATURES) return false;
+                if (seenWhite[static_cast<size_t>(idxW)]) return false;
+                seenWhite[static_cast<size_t>(idxW)] = true;
+
+                int idxB = makeFeatureIndex(kSq, p, pSq, Color::Black);
+                if (idxB < 0 || idxB >= HALFKP_FEATURES) return false;
+                if (seenBlack[static_cast<size_t>(idxB)]) return false;
+                seenBlack[static_cast<size_t>(idxB)] = true;
+            }
+        }
+    }
+
+    for (size_t i = 0; i < HALFKP_FEATURES; ++i) {
+        if (!seenWhite[i] || !seenBlack[i]) return false;
+    }
+    return true;
+}
+
+bool testGate7B_2_DeterministicReferenceVectors() {
+    using namespace eval::nnue;
+    auto opt = FenParser::parse("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+    if (!opt) return false;
+    Position pos = *opt;
+
+    auto w1 = FeatureTransformer::getActiveFeatures(pos, Color::White);
+    auto w2 = FeatureTransformer::getActiveFeatures(pos, Color::White);
+    if (w1 != w2 || w1.size() != 30) return false;
+
+    if (std::find(w1.begin(), w1.end(), 2568) == w1.end()) return false;
+    if (std::find(w1.begin(), w1.end(), 2625) == w1.end()) return false;
+    if (std::find(w1.begin(), w1.end(), 2928) == w1.end()) return false;
+
+    auto opt2 = FenParser::parse("2rr2k1/1p3ppp/3p4/p2Np3/1PP1P3/2K2P2/P3q1PP/3R3R b - - 0 1");
+    if (!opt2) return false;
+    auto t1 = FeatureTransformer::getActiveFeatures(*opt2, Color::White);
+    auto t2 = FeatureTransformer::getActiveFeatures(*opt2, Color::White);
+    if (t1 != t2) return false;
+
+    return true;
+}
+
+bool testGate7B_3_PerspectiveSymmetry() {
+    using namespace eval::nnue;
+    auto opt1 = FenParser::parse("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+    if (!opt1) return false;
+    auto w1 = FeatureTransformer::getActiveFeatures(*opt1, Color::White);
+    auto b1 = FeatureTransformer::getActiveFeatures(*opt1, Color::Black);
+    if (w1 != b1) return false;
+
+    auto opt2 = FenParser::parse("r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1");
+    if (!opt2) return false;
+    auto w2 = FeatureTransformer::getActiveFeatures(*opt2, Color::White);
+    auto b2 = FeatureTransformer::getActiveFeatures(*opt2, Color::Black);
+    if (w2 != b2) return false;
+
+    return true;
+}
+
+bool testGate7B_4_QuietMoveDeltaEquivalence() {
+    auto opt = FenParser::parse("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+    if (!opt) return false;
+    Position before = *opt;
+
+    Move m(Square::E2, Square::E4, Move::Flags::None);
+    Position after = before;
+    UndoState undo;
+    MoveExecutor::makeMove(after, m, undo);
+
+    if (!checkDeltaEquivalence(before, after, m, Color::White)) return false;
+    if (!checkDeltaEquivalence(before, after, m, Color::Black)) return false;
+
+    Move m2(Square::G1, Square::F3, Move::Flags::None);
+    after = before;
+    MoveExecutor::makeMove(after, m2, undo);
+    if (!checkDeltaEquivalence(before, after, m2, Color::White)) return false;
+    if (!checkDeltaEquivalence(before, after, m2, Color::Black)) return false;
+
+    return true;
+}
+
+bool testGate7B_5_NormalCaptureDeltaEquivalence() {
+    auto opt = FenParser::parse("r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1");
+    if (!opt) return false;
+    Position before = *opt;
+
+    Move m(Square::D5, Square::E6, Move::Flags::None);
+    Position after = before;
+    UndoState undo;
+    MoveExecutor::makeMove(after, m, undo);
+
+    if (!checkDeltaEquivalence(before, after, m, Color::White)) return false;
+    if (!checkDeltaEquivalence(before, after, m, Color::Black)) return false;
+
+    auto opt2 = FenParser::parse("2rr2k1/1p3ppp/3p4/p2Np3/1PP1P3/2K2P2/P3q1PP/3R3R b - - 0 1");
+    if (!opt2) return false;
+    Position before2 = *opt2;
+    Move m2(Square::C8, Square::C4, Move::Flags::None);
+    Position after2 = before2;
+    MoveExecutor::makeMove(after2, m2, undo);
+
+    if (!checkDeltaEquivalence(before2, after2, m2, Color::White)) return false;
+    if (!checkDeltaEquivalence(before2, after2, m2, Color::Black)) return false;
+
+    return true;
+}
+
+bool testGate7B_6_FullPromotionMatrix() {
+    const Move::PromotionPiece promos[] = {
+        Move::PromotionPiece::Queen,
+        Move::PromotionPiece::Rook,
+        Move::PromotionPiece::Bishop,
+        Move::PromotionPiece::Knight
+    };
+
+    for (auto promo : promos) {
+        auto optW1 = FenParser::parse("7k/4P3/8/8/8/8/8/7K w - - 0 1");
+        if (!optW1) return false;
+        Position before = *optW1;
+        Move m(Square::E7, Square::E8, Move::Flags::Promotion, promo);
+        Position after = before;
+        UndoState undo;
+        MoveExecutor::makeMove(after, m, undo);
+        if (!checkDeltaEquivalence(before, after, m, Color::White)) return false;
+        if (!checkDeltaEquivalence(before, after, m, Color::Black)) return false;
+
+        auto optW2 = FenParser::parse("3r3k/4P3/8/8/8/8/8/7K w - - 0 1");
+        if (!optW2) return false;
+        before = *optW2;
+        Move mCap(Square::E7, Square::D8, Move::Flags::Promotion, promo);
+        after = before;
+        MoveExecutor::makeMove(after, mCap, undo);
+        if (!checkDeltaEquivalence(before, after, mCap, Color::White)) return false;
+        if (!checkDeltaEquivalence(before, after, mCap, Color::Black)) return false;
+    }
+
+    for (auto promo : promos) {
+        auto optB1 = FenParser::parse("7k/8/8/8/8/8/4p3/7K b - - 0 1");
+        if (!optB1) return false;
+        Position before = *optB1;
+        Move m(Square::E2, Square::E1, Move::Flags::Promotion, promo);
+        Position after = before;
+        UndoState undo;
+        MoveExecutor::makeMove(after, m, undo);
+        if (!checkDeltaEquivalence(before, after, m, Color::White)) return false;
+        if (!checkDeltaEquivalence(before, after, m, Color::Black)) return false;
+
+        auto optB2 = FenParser::parse("7k/8/8/8/8/8/4p3/3R3K b - - 0 1");
+        if (!optB2) return false;
+        before = *optB2;
+        Move mCap(Square::E2, Square::D1, Move::Flags::Promotion, promo);
+        after = before;
+        MoveExecutor::makeMove(after, mCap, undo);
+        if (!checkDeltaEquivalence(before, after, mCap, Color::White)) return false;
+        if (!checkDeltaEquivalence(before, after, mCap, Color::Black)) return false;
+    }
+
+    return true;
+}
+
+bool testGate7B_7_CastlingEquivalence() {
+    // 1. White Kingside O-O
+    {
+        auto opt = FenParser::parse("r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1");
+        if (!opt) return false;
+        Position before = *opt;
+        Move m(Square::E1, Square::G1, Move::Flags::Castling);
+        Position after = before;
+        UndoState undo;
+        MoveExecutor::makeMove(after, m, undo);
+        if (!checkDeltaEquivalence(before, after, m, Color::White)) return false;
+        if (!checkDeltaEquivalence(before, after, m, Color::Black)) return false;
+    }
+
+    // 2. White Queenside O-O-O
+    {
+        auto opt = FenParser::parse("r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1");
+        if (!opt) return false;
+        Position before = *opt;
+        Move m(Square::E1, Square::C1, Move::Flags::Castling);
+        Position after = before;
+        UndoState undo;
+        MoveExecutor::makeMove(after, m, undo);
+        if (!checkDeltaEquivalence(before, after, m, Color::White)) return false;
+        if (!checkDeltaEquivalence(before, after, m, Color::Black)) return false;
+    }
+
+    // 3. Black Kingside O-O
+    {
+        auto opt = FenParser::parse("r3k2r/8/8/8/8/8/8/R3K2R b KQkq - 0 1");
+        if (!opt) return false;
+        Position before = *opt;
+        Move m(Square::E8, Square::G8, Move::Flags::Castling);
+        Position after = before;
+        UndoState undo;
+        MoveExecutor::makeMove(after, m, undo);
+        if (!checkDeltaEquivalence(before, after, m, Color::White)) return false;
+        if (!checkDeltaEquivalence(before, after, m, Color::Black)) return false;
+    }
+
+    // 4. Black Queenside O-O-O
+    {
+        auto opt = FenParser::parse("r3k2r/8/8/8/8/8/8/R3K2R b KQkq - 0 1");
+        if (!opt) return false;
+        Position before = *opt;
+        Move m(Square::E8, Square::C8, Move::Flags::Castling);
+        Position after = before;
+        UndoState undo;
+        MoveExecutor::makeMove(after, m, undo);
+        if (!checkDeltaEquivalence(before, after, m, Color::White)) return false;
+        if (!checkDeltaEquivalence(before, after, m, Color::Black)) return false;
+    }
+
+    return true;
+}
+
+bool testGate7B_8_EnPassantEquivalence() {
+    // 1. White En-Passant: e5xf6 e.p.
+    {
+        auto opt = FenParser::parse("rnbqkbnr/ppp1p1pp/8/3pPp2/8/8/PPPP1PPP/RNBQKBNR w KQkq f6 0 3");
+        if (!opt) return false;
+        Position before = *opt;
+        Move m(Square::E5, Square::F6, Move::Flags::EnPassant);
+        Position after = before;
+        UndoState undo;
+        MoveExecutor::makeMove(after, m, undo);
+        if (!checkDeltaEquivalence(before, after, m, Color::White)) return false;
+        if (!checkDeltaEquivalence(before, after, m, Color::Black)) return false;
+    }
+
+    // 2. Black En-Passant: e4xd3 e.p.
+    {
+        auto opt = FenParser::parse("rnbqkbnr/pppp1ppp/8/8/3Pp3/8/PPP1PPPP/RNBQKBNR b KQkq d3 0 2");
+        if (!opt) return false;
+        Position before = *opt;
+        Move m(Square::E4, Square::D3, Move::Flags::EnPassant);
+        Position after = before;
+        UndoState undo;
+        MoveExecutor::makeMove(after, m, undo);
+        if (!checkDeltaEquivalence(before, after, m, Color::White)) return false;
+        if (!checkDeltaEquivalence(before, after, m, Color::Black)) return false;
+    }
+
+    return true;
+}
+
+bool testGate7B_9_RandomLegalWalkOracle10k() {
+    std::mt19937 rng(42);
+    const std::string seeds[] = {
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+        "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+        "2rr2k1/1p3ppp/3p4/p2Np3/1PP1P3/2K2P2/P3q1PP/3R3R b - - 0 1",
+        "r1bq1rk1/pp2bppp/2n1pn2/2pp4/2PP4/2N1PN2/PP2BPPP/R1BQ1RK1 w - - 0 1"
+    };
+
+    int pliesExecuted = 0;
+    const int targetPlies = 10000;
+    size_t seedIndex = 0;
+
+    auto opt = FenParser::parse(seeds[0]);
+    if (!opt) return false;
+    Position currentPos = *opt;
+
+    while (pliesExecuted < targetPlies) {
+        MoveList moves;
+        MoveGenerator::generateLegalMoves(currentPos, moves);
+
+        if (moves.size() == 0 || currentPos.getHalfmoveClock() >= 100) {
+            seedIndex = (seedIndex + 1) % 4;
+            auto nextOpt = FenParser::parse(seeds[seedIndex]);
+            if (!nextOpt) return false;
+            currentPos = *nextOpt;
+            continue;
+        }
+
+        std::uniform_int_distribution<size_t> dist(0, moves.size() - 1);
+        Move m = moves[dist(rng)];
+
+        Position nextPos = currentPos;
+        UndoState undo;
+        MoveExecutor::makeMove(nextPos, m, undo);
+
+        if (!checkDeltaEquivalence(currentPos, nextPos, m, Color::White)) {
+            std::cerr << "[FAIL] Gate 7-B-9: White delta equivalence failure at ply " << pliesExecuted << "\n";
+            return false;
+        }
+        if (!checkDeltaEquivalence(currentPos, nextPos, m, Color::Black)) {
+            std::cerr << "[FAIL] Gate 7-B-9: Black delta equivalence failure at ply " << pliesExecuted << "\n";
+            return false;
+        }
+
+        currentPos = nextPos;
+        pliesExecuted++;
+    }
+
+    return true;
+}
+
+bool testGate7B_10_SetIntegrity() {
+    using namespace eval::nnue;
+    const std::string fens[] = {
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+        "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+        "2rr2k1/1p3ppp/3p4/p2Np3/1PP1P3/2K2P2/P3q1PP/3R3R b - - 0 1",
+        "8/8/4k3/4p3/4P3/4K3/8/8 w - - 0 1"
+    };
+
+    for (const auto& fen : fens) {
+        auto opt = FenParser::parse(fen);
+        if (!opt) return false;
+        const Position& pos = *opt;
+
+        for (Color c : {Color::White, Color::Black}) {
+            auto feats = FeatureTransformer::getActiveFeatures(pos, c);
+
+            for (size_t i = 1; i < feats.size(); ++i) {
+                if (feats[i] <= feats[i - 1]) return false;
+            }
+
+            size_t expectedCount = 0;
+            for (uint8_t p = 0; p < 12; ++p) {
+                Piece pc = static_cast<Piece>(p);
+                if (pc != Piece::WhiteKing && pc != Piece::BlackKing) {
+                    expectedCount += std::popcount(pos.getPieceBitboard(pc));
+                }
+            }
+
+            if (feats.size() != expectedCount) return false;
+        }
+    }
+    return true;
+}
+
+bool testGate7B_11_BenchmarkInvariance() {
+    auto& reg = ParameterRegistry::getInstance();
+    reg.resetToDefaults();
+    reg.syncToEngineParameters(SearchController::getInstance().getMutableParams());
+
+    BenchmarkConfig cfg;
+    cfg.overrideDepth = 6;
+    cfg.hashSizeMb = 16;
+    cfg.mode = BenchmarkStateMode::Isolated;
+    cfg.silentSearch = true;
+    cfg.printConsole = false;
+
+    BenchmarkRunRecord rec = BenchmarkRunner::run(cfg);
+    if (rec.aggregate.totalNodes != 313092) {
+        std::cerr << "[FAIL] Gate 7-B-11: Benchmark depth-6 nodes " << rec.aggregate.totalNodes << " != 313092\n";
+        return false;
+    }
+    return true;
+}
+
+bool runPhase7BFeatureTransformerTests() {
+    std::cout << "\n=================================================================\n";
+    std::cout << "===  MILESTONE OMEGA, PHASE 7-B: FEATURE TRANSFORMER TESTS    ===\n";
+    std::cout << "=================================================================\n";
+
+    int passed = 0;
+    int total = 11;
+
+    bool pass1 = testGate7B_1_IndexDomainAndBijectivity();
+    std::cout << "[" << (pass1 ? "PASS" : "FAIL") << "] Gate 7-B-1: Index Domain [0, 40959] & Bijectivity (40,960 Features)\n";
+    if (pass1) passed++;
+
+    bool pass2 = testGate7B_2_DeterministicReferenceVectors();
+    std::cout << "[" << (pass2 ? "PASS" : "FAIL") << "] Gate 7-B-2: Deterministic Reference Vectors (startpos, tactical)\n";
+    if (pass2) passed++;
+
+    bool pass3 = testGate7B_3_PerspectiveSymmetry();
+    std::cout << "[" << (pass3 ? "PASS" : "FAIL") << "] Gate 7-B-3: Perspective Symmetry (Identical Features on Symmetric FENs)\n";
+    if (pass3) passed++;
+
+    bool pass4 = testGate7B_4_QuietMoveDeltaEquivalence();
+    std::cout << "[" << (pass4 ? "PASS" : "FAIL") << "] Gate 7-B-4: Quiet Move Delta Equivalence\n";
+    if (pass4) passed++;
+
+    bool pass5 = testGate7B_5_NormalCaptureDeltaEquivalence();
+    std::cout << "[" << (pass5 ? "PASS" : "FAIL") << "] Gate 7-B-5: Normal Capture Delta Equivalence\n";
+    if (pass5) passed++;
+
+    bool pass6 = testGate7B_6_FullPromotionMatrix();
+    std::cout << "[" << (pass6 ? "PASS" : "FAIL") << "] Gate 7-B-6: Full Promotion Matrix (Quiet & Capture x Q, R, B, N)\n";
+    if (pass6) passed++;
+
+    bool pass7 = testGate7B_7_CastlingEquivalence();
+    std::cout << "[" << (pass7 ? "PASS" : "FAIL") << "] Gate 7-B-7: Castling Equivalence (White/Black x O-O/O-O-O)\n";
+    if (pass7) passed++;
+
+    bool pass8 = testGate7B_8_EnPassantEquivalence();
+    std::cout << "[" << (pass8 ? "PASS" : "FAIL") << "] Gate 7-B-8: En-Passant Equivalence (White & Black)\n";
+    if (pass8) passed++;
+
+    bool pass9 = testGate7B_9_RandomLegalWalkOracle10k();
+    std::cout << "[" << (pass9 ? "PASS" : "FAIL") << "] Gate 7-B-9: 10,000-Ply Random Legal Walk Oracle (20,000 Validations)\n";
+    if (pass9) passed++;
+
+    bool pass10 = testGate7B_10_SetIntegrity();
+    std::cout << "[" << (pass10 ? "PASS" : "FAIL") << "] Gate 7-B-10: Set Integrity (0 Duplicates, Exact Piece Counts)\n";
+    if (pass10) passed++;
+
+    bool pass11 = testGate7B_11_BenchmarkInvariance();
+    std::cout << "[" << (pass11 ? "PASS" : "FAIL") << "] Gate 7-B-11: Benchmark Invariance (Depth 6 == 313,092 Nodes)\n";
+    if (pass11) passed++;
+
+    std::cout << "\n=================================================================\n";
+    std::cout << "PHASE 7-B FEATURE TRANSFORMER RESULT: " << passed << "/" << total << " Gates Passed.\n";
+    std::cout << "=================================================================\n";
+
+    return (passed == total);
+}
+
 bool runOperationalSmokeMatch20Games() {
     std::cout << "\n=================================================================\n";
     std::cout << "===   RUNNING 20-GAME COLOR-BALANCED STRENGTH SMOKE MATCH     ===\n";
@@ -6204,6 +6659,7 @@ int main(int argc, char* argv[]) {
     bool phase65CSuccess = Boson::runPhase65CReverseFutilityPruningTests();
     bool phase65DSuccess = Boson::runPhase65DImprovingHeuristicTests();
     bool phase7ASuccess = Boson::runPhase7AEvaluationAbstractionTests();
+    bool phase7BSuccess = Boson::runPhase7BFeatureTransformerTests();
     bool smokeMatchSuccess = Boson::runOperationalSmokeMatch20Games();
     Boson::runDiagnostics();
     std::cout << "\n=== TEST SUITE RESULTS ===\n"
@@ -6234,7 +6690,8 @@ int main(int argc, char* argv[]) {
               << "phase65C: " << phase65CSuccess << "\n"
               << "phase65D: " << phase65DSuccess << "\n"
               << "phase7A: " << phase7ASuccess << "\n"
+              << "phase7B: " << phase7BSuccess << "\n"
               << "smokeMatch: " << smokeMatchSuccess << "\n"
               << "==========================\n";
-    return (m1Phase2Success && m1Module13Success && m2PhasesBCSuccess && m2PerftSuccess && phaseYZSuccess && phaseAASuccess && phaseABSuccess && m6Phase12Success && m6Module63Success && m6Module64Success && m6Module65Success && m6Module66Success && m6Module67Success && m6Module68Success && m6Module69Success && m6Module610Success && omegaPhase1Success && omegaPhase2Success && omegaPhase3Success && omegaPhase4Success && omegaPhase5Success && omegaPhase6Success && phase65ASuccess && phase65BSuccess && phase65CSuccess && phase65DSuccess && phase7ASuccess && smokeMatchSuccess) ? 0 : 1;
+    return (m1Phase2Success && m1Module13Success && m2PhasesBCSuccess && m2PerftSuccess && phaseYZSuccess && phaseAASuccess && phaseABSuccess && m6Phase12Success && m6Module63Success && m6Module64Success && m6Module65Success && m6Module66Success && m6Module67Success && m6Module68Success && m6Module69Success && m6Module610Success && omegaPhase1Success && omegaPhase2Success && omegaPhase3Success && omegaPhase4Success && omegaPhase5Success && omegaPhase6Success && phase65ASuccess && phase65BSuccess && phase65CSuccess && phase65DSuccess && phase7ASuccess && phase7BSuccess && smokeMatchSuccess) ? 0 : 1;
 }

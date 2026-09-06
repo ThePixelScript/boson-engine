@@ -133,10 +133,13 @@ This document outlines the architectural roadmap for the Boson chess engine, tra
   - **Phase 7-A (Evaluation Abstraction):** Decouple search engine core from concrete evaluation logic via an abstract polymorphic interface (`boson::eval::IEvaluator`) and concrete adapter (`boson::eval::ClassicalEvaluator`).
     * **Architectural Invariant:** Search is fully decoupled behind `IEvaluator` dynamic dispatch; zero `ParameterRegistry` or UCI mutations; exact bit-for-bit depth-6 benchmark node parity (313,092 nodes == 313,092 nodes, $\Delta = 0$ nodes vs frozen `v0.9.5-classical-enhanced` control).
     * **Status:** **Complete**.
-  - **Phase 7-B (Positional Terms & Tapered Evaluation):** Tapered evaluation interpolating smoothly between opening, middlegame, and endgame phases. Pawn structure terms (passed, isolated, doubled, backward), piece mobility, open/semi-open files, outpost squares, and king safety zones.
+  - **Phase 7-B (HalfKP Feature Infrastructure & Topology Specification):** Implemented canonical 40,960-feature HalfKP sparse feature transformer with scratch feature generation and differential move delta computation supporting quiets, captures, 16 promotion variants, 4 castling paths, en-passant, and opponent king captures.
+    * **Contract & Verification:** Verified complete feature-index domain coverage with no collisions under the canonical indexing scheme ($\text{Index} \in [0, 40959]$) across all 64 king squares, 10 piece codes, and 64 piece squares. Suite #29 passed 11/11 validation gates, including a 10,000-ply / 20,000-perspective delta equivalence oracle ($(\text{Features}(P_{\text{before}}) \setminus \text{removed}) \cup \text{added} == \text{Features}(P_{\text{after}})$).
+    * **Architectural Invariant:** Standalone evaluative infrastructure; zero search or parameter modifications; exact depth-6 benchmark node count parity maintained (313,092 nodes == 313,092 nodes, $\Delta = 0$ vs frozen `v0.9.5-classical-enhanced` control).
+    * **Status:** **Complete**.
   - **Phase 7-C (Automated Tuning - Texel Tuner):** Offline Texel Tuning implementation in `tools/` optimizing positional evaluation weights against grandmaster game datasets.
 - **Exit Criteria:** Statistically significant Elo gain against baseline in fixed-depth SPRT matches.
-- **Status:** In Progress (Phase 7-A Complete).
+- **Status:** In Progress (Phases 7-A & 7-B Complete).
 
 ---
 
