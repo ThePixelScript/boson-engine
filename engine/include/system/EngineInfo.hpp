@@ -95,6 +95,7 @@ public:
         oss << "  aspirationInitialDelta: " << params.search.aspirationInitialDelta << "\n";
         oss << "  aspirationMaxDelta: " << params.search.aspirationMaxDelta << "\n";
         oss << "  killerSlotCount: " << params.search.killerSlotCount << "\n";
+        oss << "  rfpMarginBase: " << params.search.rfpMarginBase << "\n";
         oss << "\n[Evaluation Parameters]\n";
         oss << "  pawnValue: " << params.eval.pawnValue << "\n";
         oss << "  knightValue: " << params.eval.knightValue << "\n";

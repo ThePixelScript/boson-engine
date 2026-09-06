@@ -179,10 +179,14 @@ int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLi
 
     int staticEval = evaluate(pos);
 
-    // Reverse Futures Pruning (RFP)
-    if (!isPvNode && !inCheck && depth <= 6 && std::abs(beta) < MATE - 100) {
-        int margin = 75 * depth;
-        if (staticEval - margin >= beta) return staticEval - margin;
+    // Reverse Futility Pruning (RFP)
+    if (!isPvNode && !inCheck && depth >= 1 && depth <= 3) {
+        if (std::abs(beta) < (MATE_SCORE - MAX_PLY) && std::abs(staticEval) < (MATE_SCORE - MAX_PLY)) {
+            const int margin = params.search.rfpMarginBase * depth;
+            if (staticEval - margin >= beta) {
+                return beta; // Cutoff: DO NOT write to TT
+            }
+        }
     }
 
     int R = params.search.nmpReduction; 

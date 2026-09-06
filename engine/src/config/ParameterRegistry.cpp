@@ -33,6 +33,9 @@ void ParameterRegistry::registerDefaultParameters() {
     registerParam(ParameterDescriptor::createInt(
         "NMP_DepthDivisor", "Minimum depth threshold to trigger null-move pruning",
         ParamGroup::SearchPruning, 3, 1, 10, ResetRequirement::None));
+    registerParam(ParameterDescriptor::createInt(
+        "RFP_MarginBase", "Base margin in centipawns per depth for Reverse Futility Pruning",
+        ParamGroup::SearchPruning, 75, 20, 200, ResetRequirement::None, true, true));
 
     // 3. Search Reductions (LMR)
     registerParam(ParameterDescriptor::createDouble(
@@ -303,6 +306,7 @@ void ParameterRegistry::syncToEngineParameters(EngineParameters& params) const {
     params.search.aspirationInitialDelta = static_cast<int>(getInt("Aspiration_InitialWindow"));
     params.search.aspirationMaxDelta = static_cast<int>(getInt("Aspiration_MaxDelta"));
     params.search.killerSlotCount = static_cast<int>(getInt("Killer_SlotCount"));
+    params.search.rfpMarginBase = static_cast<int>(getInt("RFP_MarginBase"));
 
     params.eval.pawnValue = static_cast<int>(getInt("PawnValue"));
     params.eval.knightValue = static_cast<int>(getInt("KnightValue"));
@@ -332,6 +336,7 @@ void ParameterRegistry::loadFromEngineParameters(const EngineParameters& params)
     setParam("LMR_MinMoveCount", static_cast<int64_t>(params.search.lmrMinMoveCount));
     setParam("NMP_DepthDivisor", static_cast<int64_t>(params.search.nmpMinDepth));
     setParam("NMP_BaseReduction", static_cast<int64_t>(params.search.nmpReduction));
+    setParam("RFP_MarginBase", static_cast<int64_t>(params.search.rfpMarginBase));
     setParam("Aspiration_InitialWindow", static_cast<int64_t>(params.search.aspirationInitialDelta));
     setParam("Aspiration_MaxDelta", static_cast<int64_t>(params.search.aspirationMaxDelta));
     setParam("Killer_SlotCount", static_cast<int64_t>(params.search.killerSlotCount));
@@ -359,6 +364,7 @@ void ParameterRegistry::loadFromEngineParameters(const EngineParameters& params)
 
 void ParameterRegistry::printUciOptions(std::ostream& os) const {
     for (const auto& p : m_params) {
+        if (!p.exposeUci) continue;
         switch (p.type) {
         case ParamType::Int:
             os << "option name " << p.name << " type spin default "

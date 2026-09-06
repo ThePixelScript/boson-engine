@@ -15,6 +15,7 @@ struct SearchParameters {
     int aspirationInitialDelta = 30;
     int aspirationMaxDelta = 400;
     int killerSlotCount = 2;
+    int rfpMarginBase = 75;
 };
 
 struct EvaluationParameters {

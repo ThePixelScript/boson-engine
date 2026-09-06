@@ -4513,7 +4513,7 @@ bool testGateOmega6G_DeterministicBaselinePreservation() {
         return false;
     }
 
-    // 2. KiwiPete depth 6 verification (expected: 37,515 nodes under Phase 6.5-B MovePicker)
+    // 2. KiwiPete depth 6 verification (expected: 37,816 nodes under Phase 6.5-C RFP)
     const std::string kiwipete = "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1";
     auto optKiwi = FenParser::parse(kiwipete);
     if (!optKiwi) return false;
@@ -4529,12 +4529,12 @@ bool testGateOmega6G_DeterministicBaselinePreservation() {
     }
 
     uint64_t kiwiNodes = SearchController::getInstance().getStats().nodes + SearchController::getInstance().getStats().qNodes;
-    if (kiwiNodes != 37515) {
-        std::cerr << "[FAIL] Gate Omega 6-G: KiwiPete depth 6 nodes " << kiwiNodes << " != 37515\n";
+    if (kiwiNodes != 37816) {
+        std::cerr << "[FAIL] Gate Omega 6-G: KiwiPete depth 6 nodes " << kiwiNodes << " != 37816\n";
         return false;
     }
 
-    // 3. Full benchmark suite (6 canonical positions at depth 6) == 220,504 nodes
+    // 3. Full benchmark suite (6 canonical positions at depth 6) == 207,068 nodes
     BenchmarkConfig cfg;
     cfg.overrideDepth = 6;
     cfg.hashSizeMb = 16;
@@ -4543,9 +4543,9 @@ bool testGateOmega6G_DeterministicBaselinePreservation() {
     cfg.printConsole = false;
     BenchmarkRunRecord rec = BenchmarkRunner::run(cfg);
 
-    if (rec.aggregate.totalNodes != 220504) {
+    if (rec.aggregate.totalNodes != 207068) {
         std::cerr << "[FAIL] Gate Omega 6-G: Aggregate benchmark depth 6 nodes "
-                  << rec.aggregate.totalNodes << " != 220504\n";
+                  << rec.aggregate.totalNodes << " != 207068\n";
         return false;
     }
 
@@ -5199,6 +5199,384 @@ bool runPhase65BMovePickerTests() {
     return (passed == total);
 }
 
+// ---------------------------------------------------------------------------
+// Milestone Omega, Phase 6.5-C: Reverse Futility Pruning (RFP) Tests
+// ---------------------------------------------------------------------------
+
+bool testGate65C_1_DepthBoundaries() {
+    const std::string fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+    auto opt = FenParser::parse(fen);
+    if (!opt) return false;
+    Position pos = *opt;
+
+    auto& reg = ParameterRegistry::getInstance();
+    reg.resetToDefaults();
+    reg.syncToEngineParameters(SearchController::getInstance().getMutableParams());
+    int rfpMarginBase = SearchController::getInstance().getParams().search.rfpMarginBase;
+
+    int staticEval = Search::evaluate(pos);
+
+    // 1. Test eligible depths: 1, 2, 3
+    for (int d = 1; d <= 3; ++d) {
+        BenchmarkRunner::resetSearchState(16);
+        Search::s_tt.clear();
+        PVLine pv;
+        int margin = rfpMarginBase * d;
+        int beta = staticEval - margin;
+        int alpha = beta - 1;
+
+        int score = Search::negamax(pos, d, alpha, beta, 0, pv, false, Move());
+        if (score != beta) {
+            std::cerr << "[FAIL] Phase 6.5-C Test 1: Depth " << d << " expected score " << beta << ", got " << score << "\n";
+            return false;
+        }
+        uint64_t nodes = SearchController::getInstance().getStats().nodes;
+        if (nodes != 1) {
+            std::cerr << "[FAIL] Phase 6.5-C Test 1: Depth " << d << " expected 1 node, got " << nodes << "\n";
+            return false;
+        }
+    }
+
+    // 2. Test ineligible depth 0 (goes to quiescence, does not trigger RFP)
+    {
+        BenchmarkRunner::resetSearchState(16);
+        PVLine pv;
+        int beta = staticEval - 75;
+        int alpha = beta - 1;
+        Search::negamax(pos, 0, alpha, beta, 0, pv, false, Move());
+        uint64_t qNodes = SearchController::getInstance().getStats().qNodes;
+        if (qNodes == 0) {
+            std::cerr << "[FAIL] Phase 6.5-C Test 1: Depth 0 expected qNodes > 0, got 0\n";
+            return false;
+        }
+    }
+
+    // 3. Test ineligible depth 4 (depth > 3 guard prevents RFP)
+    {
+        BenchmarkRunner::resetSearchState(16);
+        Search::s_tt.clear();
+        PVLine pv;
+        int margin = rfpMarginBase * 4;
+        int beta = staticEval - margin;
+        int alpha = beta - 1;
+        Search::negamax(pos, 4, alpha, beta, 0, pv, false, Move());
+        uint64_t nodes = SearchController::getInstance().getStats().nodes;
+        if (nodes <= 1) {
+            std::cerr << "[FAIL] Phase 6.5-C Test 1: Depth 4 should not trigger RFP (nodes > 1 expected, got " << nodes << ")\n";
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool testGate65C_2_WindowGuard() {
+    const std::string fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+    auto opt = FenParser::parse(fen);
+    if (!opt) return false;
+    Position pos = *opt;
+
+    auto& reg = ParameterRegistry::getInstance();
+    reg.resetToDefaults();
+    reg.syncToEngineParameters(SearchController::getInstance().getMutableParams());
+    int rfpMarginBase = SearchController::getInstance().getParams().search.rfpMarginBase;
+
+    int staticEval = Search::evaluate(pos);
+    int d = 2;
+    int margin = rfpMarginBase * d;
+    int beta = staticEval - margin;
+
+    // Set a wide PV window: beta - alpha > 1
+    int alpha = beta - 50;
+    BenchmarkRunner::resetSearchState(16);
+    Search::s_tt.clear();
+    PVLine pv;
+
+    Search::negamax(pos, d, alpha, beta, 0, pv, false, Move());
+    uint64_t nodes = SearchController::getInstance().getStats().nodes;
+    if (nodes <= 1) {
+        std::cerr << "[FAIL] Phase 6.5-C Test 2: PV node triggered RFP unexpectedly (nodes: " << nodes << ")\n";
+        return false;
+    }
+    if (pv.count == 0) {
+        std::cerr << "[FAIL] Phase 6.5-C Test 2: PV node should have generated moves in PV line\n";
+        return false;
+    }
+
+    return true;
+}
+
+bool testGate65C_3_InCheckSafety() {
+    // Position where White is in check from Qf2, can play Kxf2
+    const std::string fen = "r1b1kbnr/pppp1ppp/8/4p3/4P3/8/PPPP1qPP/RNBQKBNR w KQkq - 0 4";
+    auto opt = FenParser::parse(fen);
+    if (!opt) return false;
+    Position pos = *opt;
+
+    if (!MoveGenerator::inCheck(pos, pos.getSideToMove())) {
+        std::cerr << "[FAIL] Phase 6.5-C Test 3: Test position is not in check\n";
+        return false;
+    }
+
+    auto& reg = ParameterRegistry::getInstance();
+    reg.resetToDefaults();
+    reg.syncToEngineParameters(SearchController::getInstance().getMutableParams());
+    int rfpMarginBase = SearchController::getInstance().getParams().search.rfpMarginBase;
+
+    int staticEval = Search::evaluate(pos);
+    int d = 2;
+    int margin = rfpMarginBase * d;
+    int beta = staticEval - margin;
+    int alpha = beta - 1;
+
+    BenchmarkRunner::resetSearchState(16);
+    Search::s_tt.clear();
+    PVLine pv;
+
+    Search::negamax(pos, d, alpha, beta, 0, pv, false, Move());
+    uint64_t nodes = SearchController::getInstance().getStats().nodes;
+    if (nodes <= 1) {
+        std::cerr << "[FAIL] Phase 6.5-C Test 3: In-check position triggered RFP unexpectedly (nodes: " << nodes << ")\n";
+        return false;
+    }
+
+    return true;
+}
+
+bool testGate65C_4_MateSafetyGuard() {
+    const std::string fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+    auto opt = FenParser::parse(fen);
+    if (!opt) return false;
+    Position pos = *opt;
+
+    auto& reg = ParameterRegistry::getInstance();
+    reg.resetToDefaults();
+    reg.syncToEngineParameters(SearchController::getInstance().getMutableParams());
+
+    // 1. Beta >= MATE_SCORE - MAX_PLY
+    {
+        BenchmarkRunner::resetSearchState(16);
+        Search::s_tt.clear();
+        PVLine pv;
+        int mateBound = Search::MATE_SCORE - Search::MAX_PLY;
+        int beta = mateBound + 10;
+        int alpha = beta - 1;
+
+        Search::negamax(pos, 2, alpha, beta, 0, pv, false, Move());
+        uint64_t nodes = SearchController::getInstance().getStats().nodes;
+        if (nodes <= 1) {
+            std::cerr << "[FAIL] Phase 6.5-C Test 4: Mate bound (high) triggered RFP unexpectedly\n";
+            return false;
+        }
+    }
+
+    // 2. Beta <= -(MATE_SCORE - MAX_PLY)
+    {
+        BenchmarkRunner::resetSearchState(16);
+        Search::s_tt.clear();
+        PVLine pv;
+        int mateBound = -(Search::MATE_SCORE - Search::MAX_PLY);
+        int beta = mateBound - 10;
+        int alpha = beta - 1;
+
+        Search::negamax(pos, 2, alpha, beta, 0, pv, false, Move());
+        uint64_t nodes = SearchController::getInstance().getStats().nodes;
+        if (nodes <= 1) {
+            std::cerr << "[FAIL] Phase 6.5-C Test 4: Mate bound (low) triggered RFP unexpectedly\n";
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool testGate65C_5_TTLowerBoundContaminationGuard() {
+    const std::string fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+    auto opt = FenParser::parse(fen);
+    if (!opt) return false;
+    Position pos = *opt;
+
+    auto& reg = ParameterRegistry::getInstance();
+    reg.resetToDefaults();
+    reg.syncToEngineParameters(SearchController::getInstance().getMutableParams());
+    int rfpMarginBase = SearchController::getInstance().getParams().search.rfpMarginBase;
+
+    BenchmarkRunner::resetSearchState(16);
+    Search::s_tt.clear();
+
+    int staticEval = Search::evaluate(pos);
+    int d = 2;
+    int margin = rfpMarginBase * d;
+    int beta = staticEval - margin;
+    int alpha = beta - 1;
+    PVLine pv;
+
+    int score = Search::negamax(pos, d, alpha, beta, 0, pv, false, Move());
+    if (score != beta) {
+        std::cerr << "[FAIL] Phase 6.5-C Test 5: Expected RFP cutoff score " << beta << ", got " << score << "\n";
+        return false;
+    }
+    if (SearchController::getInstance().getStats().nodes != 1) {
+        std::cerr << "[FAIL] Phase 6.5-C Test 5: Expected exactly 1 node on RFP cutoff\n";
+        return false;
+    }
+
+    int ttScore = 0;
+    int ttDepth = 0;
+    Move ttMove;
+    TTNodeType ttType = TTNodeType::Exact;
+    bool hit = Search::s_tt.probeEntry(pos.getHashKey(), ttScore, ttMove, ttDepth, ttType);
+
+    if (hit) {
+        if (ttType == TTNodeType::LowerBound) {
+            std::cerr << "[FAIL] Phase 6.5-C Test 5: TT contaminated with LowerBound entry on RFP trigger!\n";
+            return false;
+        }
+        std::cerr << "[FAIL] Phase 6.5-C Test 5: TT contains entry after RFP cutoff when TT was clean!\n";
+        return false;
+    }
+
+    return true;
+}
+
+bool testGate65C_6_MarginBoundaries() {
+    const std::string fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+    auto opt = FenParser::parse(fen);
+    if (!opt) return false;
+    Position pos = *opt;
+
+    int staticEval = Search::evaluate(pos);
+    const int depth = 2;
+    const int testMargins[] = {20, 75, 200};
+
+    for (int marginBase : testMargins) {
+        SearchController::getInstance().getMutableParams().search.rfpMarginBase = marginBase;
+        int margin = marginBase * depth;
+
+        // 1. Cutoff boundary: staticEval - margin >= beta (should trigger RFP)
+        {
+            BenchmarkRunner::resetSearchState(16);
+            Search::s_tt.clear();
+            PVLine pv;
+            int beta = staticEval - margin;
+            int alpha = beta - 1;
+            int score = Search::negamax(pos, depth, alpha, beta, 0, pv, false, Move());
+            if (score != beta || SearchController::getInstance().getStats().nodes != 1) {
+                std::cerr << "[FAIL] Phase 6.5-C Test 6: Margin " << marginBase << " cutoff failed to trigger RFP\n";
+                SearchController::getInstance().getMutableParams().search.rfpMarginBase = 75;
+                return false;
+            }
+        }
+
+        // 2. Below cutoff boundary: staticEval - margin < beta (should NOT trigger RFP)
+        {
+            BenchmarkRunner::resetSearchState(16);
+            Search::s_tt.clear();
+            PVLine pv;
+            int beta = staticEval - margin + 1;
+            int alpha = beta - 1;
+            Search::negamax(pos, depth, alpha, beta, 0, pv, false, Move());
+            if (SearchController::getInstance().getStats().nodes <= 1) {
+                std::cerr << "[FAIL] Phase 6.5-C Test 6: Margin " << marginBase << " non-cutoff falsely triggered RFP\n";
+                SearchController::getInstance().getMutableParams().search.rfpMarginBase = 75;
+                return false;
+            }
+        }
+    }
+
+    // Restore default margin
+    SearchController::getInstance().getMutableParams().search.rfpMarginBase = 75;
+    return true;
+}
+
+bool testGate65C_7_TacticalAndBestMovePreservation() {
+    auto& reg = ParameterRegistry::getInstance();
+    reg.resetToDefaults();
+    reg.syncToEngineParameters(SearchController::getInstance().getMutableParams());
+
+    struct CanonicalTarget {
+        std::string name;
+        std::string fen;
+        std::string expectedMove;
+        int depth;
+    };
+
+    const CanonicalTarget targets[] = {
+        {"startpos", "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", "b1c3", 6},
+        {"kiwipete", "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1", "e2a6", 6},
+        {"tactical_wac001", "2rr2k1/1p3ppp/3p4/p2Np3/1PP1P3/2K2P2/P3q1PP/3R3R b - - 0 1", "c8c4", 6},
+        {"search_stress_evasions", "rnb1k1nr/pppp1ppp/4p3/8/3P2q1/5N2/PPP1PPPP/RN1QKB1R w KQkq - 0 1", "f3e5", 6}
+    };
+
+    for (const auto& t : targets) {
+        auto opt = FenParser::parse(t.fen);
+        if (!opt) return false;
+        Position pos = *opt;
+
+        BenchmarkRunner::resetSearchState(16);
+        SearchLimits limits;
+        limits.depth = t.depth;
+        limits.clearTables = true;
+        Search::runSearch(pos, limits);
+
+        const auto& stats = SearchController::getInstance().getStats();
+        if (stats.pvLine.count == 0) {
+            std::cerr << "[FAIL] Phase 6.5-C Test 7: No move in PV line for " << t.name << "\n";
+            return false;
+        }
+        std::string bestMove = stats.pvLine.moves[0].toString();
+        if (bestMove != t.expectedMove) {
+            std::cerr << "[FAIL] Phase 6.5-C Test 7: " << t.name << " best move " << bestMove << " != " << t.expectedMove << "\n";
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool runPhase65CReverseFutilityPruningTests() {
+    std::cout << "\n=================================================================\n";
+    std::cout << "===  MILESTONE OMEGA, PHASE 6.5-C: REVERSE FUTILITY PRUNING   ===\n";
+    std::cout << "=================================================================\n";
+
+    int passed = 0;
+    int total = 7;
+
+    bool pass1 = testGate65C_1_DepthBoundaries();
+    std::cout << "[" << (pass1 ? "PASS" : "FAIL") << "] Phase 6.5-C Test 1: Depth Boundaries (Depths 1-3 Eligible; 0, 4 Ineligible)\n";
+    if (pass1) passed++;
+
+    bool pass2 = testGate65C_2_WindowGuard();
+    std::cout << "[" << (pass2 ? "PASS" : "FAIL") << "] Phase 6.5-C Test 2: Window Guard (PV Nodes Never Trigger RFP)\n";
+    if (pass2) passed++;
+
+    bool pass3 = testGate65C_3_InCheckSafety();
+    std::cout << "[" << (pass3 ? "PASS" : "FAIL") << "] Phase 6.5-C Test 3: In-Check Safety (In-Check Positions Never Trigger RFP)\n";
+    if (pass3) passed++;
+
+    bool pass4 = testGate65C_4_MateSafetyGuard();
+    std::cout << "[" << (pass4 ? "PASS" : "FAIL") << "] Phase 6.5-C Test 4: Mate Safety Guard (|beta| >= MATE_SCORE - MAX_PLY)\n";
+    if (pass4) passed++;
+
+    bool pass5 = testGate65C_5_TTLowerBoundContaminationGuard();
+    std::cout << "[" << (pass5 ? "PASS" : "FAIL") << "] Phase 6.5-C Test 5: TT LowerBound Contamination Guard (Zero TT Writes on RFP)\n";
+    if (pass5) passed++;
+
+    bool pass6 = testGate65C_6_MarginBoundaries();
+    std::cout << "[" << (pass6 ? "PASS" : "FAIL") << "] Phase 6.5-C Test 6: Margin Boundaries (RFP_MarginBase = 20, 75, 200)\n";
+    if (pass6) passed++;
+
+    bool pass7 = testGate65C_7_TacticalAndBestMovePreservation();
+    std::cout << "[" << (pass7 ? "PASS" : "FAIL") << "] Phase 6.5-C Test 7: Tactical & Best-Move Preservation (4 Canonical Positions)\n";
+    if (pass7) passed++;
+
+    std::cout << "\n=================================================================\n";
+    std::cout << "PHASE 6.5-C RFP RESULT: " << passed << "/" << total << " Test Categories Passed.\n";
+    std::cout << "=================================================================\n";
+
+    return (passed == total);
+}
+
 bool runOperationalSmokeMatch20Games() {
     std::cout << "\n=================================================================\n";
     std::cout << "===   RUNNING 20-GAME COLOR-BALANCED STRENGTH SMOKE MATCH     ===\n";
@@ -5294,6 +5672,7 @@ int main() {
     bool omegaPhase6Success = Boson::runMilestoneOmegaPhase6ParameterRegistryTests();
     bool phase65ASuccess = Boson::runPhase65APvsTests();
     bool phase65BSuccess = Boson::runPhase65BMovePickerTests();
+    bool phase65CSuccess = Boson::runPhase65CReverseFutilityPruningTests();
     bool smokeMatchSuccess = Boson::runOperationalSmokeMatch20Games();
     Boson::runDiagnostics();
     std::cout << "\n=== TEST SUITE RESULTS ===\n"
@@ -5321,7 +5700,8 @@ int main() {
               << "omegaPhase6: " << omegaPhase6Success << "\n"
               << "phase65A: " << phase65ASuccess << "\n"
               << "phase65B: " << phase65BSuccess << "\n"
+              << "phase65C: " << phase65CSuccess << "\n"
               << "smokeMatch: " << smokeMatchSuccess << "\n"
               << "==========================\n";
-    return (m1Phase2Success && m1Module13Success && m2PhasesBCSuccess && m2PerftSuccess && phaseYZSuccess && phaseAASuccess && phaseABSuccess && m6Phase12Success && m6Module63Success && m6Module64Success && m6Module65Success && m6Module66Success && m6Module67Success && m6Module68Success && m6Module69Success && m6Module610Success && omegaPhase1Success && omegaPhase2Success && omegaPhase3Success && omegaPhase4Success && omegaPhase5Success && omegaPhase6Success && phase65ASuccess && phase65BSuccess && smokeMatchSuccess) ? 0 : 1;
+    return (m1Phase2Success && m1Module13Success && m2PhasesBCSuccess && m2PerftSuccess && phaseYZSuccess && phaseAASuccess && phaseABSuccess && m6Phase12Success && m6Module63Success && m6Module64Success && m6Module65Success && m6Module66Success && m6Module67Success && m6Module68Success && m6Module69Success && m6Module610Success && omegaPhase1Success && omegaPhase2Success && omegaPhase3Success && omegaPhase4Success && omegaPhase5Success && omegaPhase6Success && phase65ASuccess && phase65BSuccess && phase65CSuccess && smokeMatchSuccess) ? 0 : 1;
 }

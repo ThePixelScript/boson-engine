@@ -82,6 +82,8 @@ struct ParameterDescriptor {
     ParamValue minValue{int64_t{0}};
     ParamValue maxValue{int64_t{0}};
     ParamValue currentValue{int64_t{0}};
+    bool exposeUci{true};
+    bool tunableSpsa{false};
 
     [[nodiscard]] int64_t getInt() const {
         return std::get<int64_t>(currentValue);
@@ -118,7 +120,8 @@ struct ParameterDescriptor {
 
     static ParameterDescriptor createInt(std::string name, std::string desc, ParamGroup group,
                                          int64_t defVal, int64_t minVal, int64_t maxVal,
-                                         ResetRequirement reset = ResetRequirement::None) {
+                                         ResetRequirement reset = ResetRequirement::None,
+                                         bool exposeUci = true, bool tunableSpsa = false) {
         ParameterDescriptor d;
         d.name = std::move(name);
         d.description = std::move(desc);
@@ -129,12 +132,15 @@ struct ParameterDescriptor {
         d.minValue = minVal;
         d.maxValue = maxVal;
         d.currentValue = defVal;
+        d.exposeUci = exposeUci;
+        d.tunableSpsa = tunableSpsa;
         return d;
     }
 
     static ParameterDescriptor createBool(std::string name, std::string desc, ParamGroup group,
                                           bool defVal,
-                                          ResetRequirement reset = ResetRequirement::None) {
+                                          ResetRequirement reset = ResetRequirement::None,
+                                          bool exposeUci = true, bool tunableSpsa = false) {
         ParameterDescriptor d;
         d.name = std::move(name);
         d.description = std::move(desc);
@@ -145,12 +151,15 @@ struct ParameterDescriptor {
         d.minValue = false;
         d.maxValue = true;
         d.currentValue = defVal;
+        d.exposeUci = exposeUci;
+        d.tunableSpsa = tunableSpsa;
         return d;
     }
 
     static ParameterDescriptor createDouble(std::string name, std::string desc, ParamGroup group,
                                             double defVal, double minVal, double maxVal,
-                                            ResetRequirement reset = ResetRequirement::None) {
+                                            ResetRequirement reset = ResetRequirement::None,
+                                            bool exposeUci = true, bool tunableSpsa = false) {
         ParameterDescriptor d;
         d.name = std::move(name);
         d.description = std::move(desc);
@@ -161,6 +170,8 @@ struct ParameterDescriptor {
         d.minValue = minVal;
         d.maxValue = maxVal;
         d.currentValue = defVal;
+        d.exposeUci = exposeUci;
+        d.tunableSpsa = tunableSpsa;
         return d;
     }
 };

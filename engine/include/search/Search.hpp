@@ -22,6 +22,8 @@ public:
     
     static constexpr int INF = 32000;
     static constexpr int MATE = 31000;
+    static constexpr int MATE_SCORE = MATE;
+    static constexpr int MAX_PLY = 64;
     static constexpr uint64_t NODE_CHECK_PERIOD = 2048;
     static constexpr int ASPIRATION_INITIAL_DELTA = 30;
     static constexpr int ASPIRATION_MAX_DELTA = 400;
