@@ -166,8 +166,20 @@ This document outlines the architectural roadmap for the Boson chess engine, tra
     * **Benchmark Methodology & Performance Metrics:** Benchmark executed on a single thread across 100,000 forward inference iterations (MSVC 1951 C++23 Release `/O2 /Oi /arch:AVX2`): 809.43 ms (Scalar) $\to$ 89.25 ms (AVX2), achieving a **9.07x speedup** and **1.12M evaluations/sec** (1,120,459 evals/sec).
     * **Classical Search Invariance:** Depth-6 benchmark locked at exactly **313,092 nodes** (0 node drift vs `v0.9.5-classical-enhanced`). Suite #33 passed 14/14 acceptance gates.
     * **Status:** **Complete**.
+  - **Phase 7-GA (NNUE Strength Validation Infrastructure & SPRT Framework):** Implemented the full experimental evaluation infrastructure, deterministic tournament runner, and sequential hypothesis testing framework for empirical NNUE strength measurement.
+    * **Strict Model Identity & Fail-Fast CLI:** Implemented CLI flag `--require-nnue` with strict fail-fast enforcement (`std::exit(1)`) and zero silent fallback to Classical on missing, malformed, or incompatible network models.
+    * **FIPS 180-4 In-Engine SHA-256 Engine:** Added high-performance in-engine SHA-256 calculation for binary model validation and pre-match engine handshake auditing (`Eval_Mode`, model SHA-256 digest, AVX2 SIMD backend, and `Network Version=1`).
+    * **Balanced 50-Opening Book & 4-Game Schedule:** Expanded the opening suite to 50 balanced 2-ply/4-ply openings (`open_01` to `open_50`) verified for legality and exact FEN equivalence. Enforced a deterministic 4-game-per-opening alternating color cadence ($C\text{-}W/N\text{-}B, N\text{-}W/C\text{-}B, C\text{-}W/N\text{-}B, N\text{-}W/C\text{-}B$) totaling 200 games per match.
+    * **Decoupled Statistical Analysis:** Implemented reporting for W/D/L, draw rate, average game ply, logistic Elo ($\Delta\text{Elo} = -400 \cdot \log_{10}(1/S - 1)$), and delta-method 95% confidence intervals ($\pm 1.96 \cdot \sigma_S \cdot [400 / (\ln(10) S(1-S))]$).
+    * **Wald SPRT Sequential Framework:** Implemented sequential probability ratio testing with explicit hypotheses ($H_0: 0\text{ Elo}, H_1: +10\text{ Elo}, \alpha=0.05, \beta=0.05$) and exact log-likelihood boundaries ($\pm 2.944439$).
+    * **Classical Search Control Invariance:** Depth-6 benchmark locked at exactly **313,092 nodes** ($\Delta = 0$ nodes vs frozen `v0.9.5-classical-enhanced` control).
+    * **Full Regression Battery:** Suite #34 passed all 13 validation gates (Gates 7-G-1 through 7-G-12, including Gate 7-G-2A). All 34 test suites passing cleanly (`phase7G: 1`).
+    * **Status:** **Complete**.
+  - **Phase 7-GB (First Empirical NNUE Strength Experiment):** Execute the 200-game empirical tournament between Candidate (AVX2 NNUE) and Control (Classical HCE) using the validated Phase 7-GA experimental harness.
+    * **Scope:** Phase 7-GA establishes the validated experimental capability; Phase 7-GB will execute the actual 200-game tournament under fixed time control and record the empirical strength outcome (W/D/L, Score, Draw Rate, Delta-Elo, 95% CI, and SPRT decision).
+    * **Status:** **Pending Execution**.
 - **Exit Criteria:** Statistically significant Elo gain against baseline in fixed-depth SPRT matches.
-- **Status:** In Progress (Phases 7-A, 7-B, 7-C, 7-D, 7-E, & 7-F Complete).
+- **Status:** In Progress (Phases 7-A, 7-B, 7-C, 7-D, 7-E, 7-F, & 7-GA Complete; Phase 7-GB Pending Execution).
 
 ---
 

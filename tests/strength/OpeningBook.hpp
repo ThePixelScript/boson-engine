@@ -23,6 +23,7 @@ public:
     [[nodiscard]] static std::string_view getVersion() noexcept { return VERSION; }
     [[nodiscard]] static std::span<const OpeningEntry> getOpenings() noexcept;
     [[nodiscard]] static const OpeningEntry& getOpening(size_t index) noexcept;
+    [[nodiscard]] static size_t size() noexcept;
 };
 
 } // namespace Boson

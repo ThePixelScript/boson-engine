@@ -18,6 +18,8 @@ public:
     virtual std::string getBestMove(int timeoutMs = 5000) = 0;
     virtual void setParameters(const EngineParameters& params) = 0;
     [[nodiscard]] virtual const std::string& getName() const noexcept = 0;
+    [[nodiscard]] virtual const EngineParameters& getParameters() const noexcept = 0;
+    [[nodiscard]] virtual std::string getMetadata() const { return ""; }
 };
 
 class InProcessUciEngine : public IUciEngine {
@@ -27,6 +29,8 @@ public:
     std::string getBestMove(int timeoutMs = 5000) override;
     void setParameters(const EngineParameters& params) override;
     [[nodiscard]] const std::string& getName() const noexcept override { return m_name; }
+    [[nodiscard]] const EngineParameters& getParameters() const noexcept override { return m_params; }
+    [[nodiscard]] std::string getMetadata() const override;
 
 private:
     std::string m_name;
@@ -40,6 +44,7 @@ class MatchRunner {
 public:
     static MatchRecord runMatch(const MatchConfig& config, IUciEngine* customEngineA = nullptr, IUciEngine* customEngineB = nullptr);
     static GameRecord playGame(uint32_t gameId, IUciEngine& whiteEngine, IUciEngine& blackEngine, const OpeningEntry& opening, const MatchConfig& config);
+    [[nodiscard]] static std::string exportPgn(const GameRecord& game);
 };
 
 } // namespace Boson

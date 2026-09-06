@@ -142,7 +142,27 @@ SPRTResult Statistics::evaluateSPRT(uint32_t wins, uint32_t draws, uint32_t loss
     return res;
 }
 
-MatchStatistics Statistics::computeStatistics(uint32_t wins, uint32_t draws, uint32_t losses, double elo0, double elo1, double alpha, double beta) noexcept {
+double Statistics::calculateDrawRate(uint32_t draws, uint32_t totalGames) noexcept {
+    if (totalGames == 0) return 0.0;
+    return static_cast<double>(draws) / static_cast<double>(totalGames);
+}
+
+double Statistics::calculateLogisticElo(double p, double eps) noexcept {
+    double p_clamped = std::clamp(p, eps, 1.0 - eps);
+    if (std::abs(p - 0.5) < 1e-12) return 0.0;
+    return -400.0 * std::log10(1.0 / p_clamped - 1.0);
+}
+
+double Statistics::calculateCI95Margin(double p, uint32_t totalGames, double eps) noexcept {
+    if (totalGames == 0) return 0.0;
+    double p_clamped = std::clamp(p, eps, 1.0 - eps);
+    double N = static_cast<double>(totalGames);
+    double se = std::sqrt(p_clamped * (1.0 - p_clamped) / N);
+    double deriv = 400.0 / (std::log(10.0) * p_clamped * (1.0 - p_clamped));
+    return 1.96 * se * deriv;
+}
+
+MatchStatistics Statistics::computeFixedSampleStatistics(uint32_t wins, uint32_t draws, uint32_t losses) noexcept {
     MatchStatistics stats;
     stats.wins = wins;
     stats.draws = draws;
@@ -150,29 +170,35 @@ MatchStatistics Statistics::computeStatistics(uint32_t wins, uint32_t draws, uin
     stats.totalGames = wins + draws + losses;
 
     stats.score = calculateScore(wins, draws, stats.totalGames);
+    stats.drawRate = calculateDrawRate(draws, stats.totalGames);
     stats.scorePercentage = stats.score * 100.0;
     stats.sampleVariance = calculateSampleVariance(wins, draws, losses, stats.totalGames, stats.score);
     stats.standardError = calculateStandardError(stats.sampleVariance, stats.totalGames);
 
-    stats.ci = calculateConfidenceInterval(stats.score, stats.totalGames);
+    stats.logisticElo = calculateLogisticElo(stats.score);
+    stats.ci95Margin = calculateCI95Margin(stats.score, stats.totalGames);
 
+    stats.ci = calculateConfidenceInterval(stats.score, stats.totalGames);
     stats.observedScore = stats.ci.observedScore;
     stats.rawWilsonLower = stats.ci.rawWilsonLower;
     stats.rawWilsonUpper = stats.ci.rawWilsonUpper;
     stats.eloScoreLower = stats.ci.eloScoreLower;
     stats.eloScoreUpper = stats.ci.eloScoreUpper;
     stats.deltaElo = stats.ci.deltaElo;
-    stats.eloLower = stats.ci.eloLower;
-    stats.eloUpper = stats.ci.eloUpper;
 
-    // Backward-compatibility aliases
-    stats.scoreLow = stats.ci.rawWilsonLower;
-    stats.scoreHigh = stats.ci.rawWilsonUpper;
-    stats.eloLow = stats.ci.eloLower;
-    stats.eloHigh = stats.ci.eloUpper;
+    stats.eloLower = stats.logisticElo - stats.ci95Margin;
+    stats.eloUpper = stats.logisticElo + stats.ci95Margin;
+    stats.eloLow = stats.eloLower;
+    stats.eloHigh = stats.eloUpper;
+    stats.scoreLow = stats.rawWilsonLower;
+    stats.scoreHigh = stats.rawWilsonUpper;
 
+    return stats;
+}
+
+MatchStatistics Statistics::computeStatistics(uint32_t wins, uint32_t draws, uint32_t losses, double elo0, double elo1, double alpha, double beta) noexcept {
+    MatchStatistics stats = computeFixedSampleStatistics(wins, draws, losses);
     stats.sprt = evaluateSPRT(wins, draws, losses, elo0, elo1, alpha, beta);
-
     return stats;
 }
 

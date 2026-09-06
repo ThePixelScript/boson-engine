@@ -5,7 +5,19 @@
 #include "eval/nnue/NetworkModel.hpp"
 #include "eval/nnue/AccumulatorStack.hpp"
 
+#include <string>
+#include <string_view>
+#include <memory>
+
 namespace Boson::eval::nnue {
+
+[[nodiscard]] std::string computeSha256(const uint8_t* data, size_t length);
+[[nodiscard]] std::string computeSha256(std::string_view data);
+[[nodiscard]] std::string computeFileSha256(const std::string& path);
+[[nodiscard]] std::string computeModelSha256(const NetworkModel& model);
+
+[[nodiscard]] bool loadModelStrict(const std::string& path);
+[[nodiscard]] bool loadModel(const std::string& path, bool strict = false);
 
 class NNUEEvaluator final : public IEvaluator {
 public:
@@ -21,6 +33,20 @@ public:
     [[nodiscard]] const AccumulatorStack& getStack() const noexcept { return m_stack; }
     [[nodiscard]] AccumulatorStack& getMutableStack() noexcept { return m_stack; }
     [[nodiscard]] const NetworkModel& getModel() const noexcept { return m_model; }
+
+    // Static Model Management & Identity
+    static bool loadModelStrict(const std::string& path);
+    static bool loadModel(const std::string& path, bool strict = false);
+    [[nodiscard]] static const std::string& getActiveModelSha256() noexcept;
+    [[nodiscard]] static const NetworkModel& getActiveModel() noexcept;
+    [[nodiscard]] static bool hasLoadedModel() noexcept;
+    static void setRequireNNUE(bool require) noexcept;
+    [[nodiscard]] static bool isRequireNNUE() noexcept;
+    static void setActiveModel(NetworkModel&& model, std::string sha256 = "");
+    static void resetToSyntheticModel(uint32_t seed = 1337);
+    static NNUEEvaluator& getInstance() noexcept;
+    static void setHardExitOnFailure(bool enable) noexcept;
+    [[nodiscard]] static bool isHardExitOnFailure() noexcept;
 
 private:
     const NetworkModel& m_model;

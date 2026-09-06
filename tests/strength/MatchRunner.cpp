@@ -14,6 +14,9 @@
 #include <algorithm>
 #include <bit>
 
+#include "eval/nnue/NNUEEvaluator.hpp"
+#include "eval/nnue/AVX2Inference.hpp"
+
 namespace Boson {
 
 namespace {
@@ -227,6 +230,48 @@ void InProcessUciEngine::setParameters(const EngineParameters& params) {
     m_params = params;
 }
 
+std::string InProcessUciEngine::getMetadata() const {
+    if (m_params.eval.evalMode == 1) {
+        std::ostringstream ss;
+        const auto& sha = eval::nnue::NNUEEvaluator::getActiveModelSha256();
+        std::string shaDisplay = sha.empty() ? "N/A" : sha;
+        const char* backend = (eval::nnue::AVX2Inference::getActiveBackend() == eval::nnue::InferenceBackend::AVX2 ||
+                               (eval::nnue::AVX2Inference::getActiveBackend() == eval::nnue::InferenceBackend::Auto && eval::nnue::AVX2Inference::isSupported()))
+                              ? "AVX2" : "Scalar";
+        ss << "Eval_Mode=1 (NNUE), Model SHA-256=" << shaDisplay
+           << ", Backend=" << backend
+           << ", Network Version=" << eval::nnue::NNUE_VERSION;
+        return ss.str();
+    } else {
+        return "Eval_Mode=0 (Classical), Model SHA-256=N/A, Backend=N/A, Network Version=N/A";
+    }
+}
+
+std::string MatchRunner::exportPgn(const GameRecord& game) {
+    std::ostringstream ss;
+    ss << "[Event \"Boson Strength Tournament\"]\n";
+    ss << "[Site \"Local\"]\n";
+    ss << "[Round \"" << game.gameId << "\"]\n";
+    ss << "[White \"" << game.whiteEngine << "\"]\n";
+    ss << "[Black \"" << game.blackEngine << "\"]\n";
+    ss << "[Result \"" << resultToString(game.result) << "\"]\n";
+    ss << "[Termination \"" << terminationToString(game.termination) << "\"]\n";
+    ss << "[PlyCount \"" << game.plyCount << "\"]\n";
+    if (!game.engineMetadata.empty()) {
+        ss << "[Metadata \"" << game.engineMetadata << "\"]\n";
+    }
+    ss << "\n";
+
+    for (size_t i = 0; i < game.moves.size(); ++i) {
+        if (i % 2 == 0) {
+            ss << (i / 2 + 1) << ". ";
+        }
+        ss << game.moves[i] << " ";
+    }
+    ss << resultToString(game.result) << "\n\n";
+    return ss.str();
+}
+
 GameRecord MatchRunner::playGame(uint32_t gameId, IUciEngine& whiteEngine, IUciEngine& blackEngine, const OpeningEntry& opening, const MatchConfig& config) {
     auto tStart = std::chrono::high_resolution_clock::now();
 
@@ -237,6 +282,29 @@ GameRecord MatchRunner::playGame(uint32_t gameId, IUciEngine& whiteEngine, IUciE
     record.whiteEngine = whiteEngine.getName();
     record.blackEngine = blackEngine.getName();
 
+    std::string metaW = whiteEngine.getMetadata();
+    std::string metaB = blackEngine.getMetadata();
+    record.engineMetadata = "White: [" + metaW + "] | Black: [" + metaB + "]";
+
+    auto verifyNNUECandidate = [](const IUciEngine& eng) -> bool {
+        if (eng.getParameters().eval.evalMode == 1) {
+            const auto& sha = eval::nnue::NNUEEvaluator::getActiveModelSha256();
+            if (sha.empty() || sha.length() != 64) return false;
+            if (eval::nnue::AVX2Inference::getActiveBackend() != eval::nnue::InferenceBackend::AVX2 &&
+                !eval::nnue::AVX2Inference::isSupported()) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    if (!verifyNNUECandidate(whiteEngine) || !verifyNNUECandidate(blackEngine)) {
+        record.termination = TerminationType::ProtocolError;
+        record.result = GameResult::Draw;
+        record.pgn = exportPgn(record);
+        return record;
+    }
+
     whiteEngine.sendCommand("ucinewgame");
     blackEngine.sendCommand("ucinewgame");
 
@@ -244,6 +312,7 @@ GameRecord MatchRunner::playGame(uint32_t gameId, IUciEngine& whiteEngine, IUciE
     if (!startOpt) {
         record.termination = TerminationType::ProtocolError;
         record.result = GameResult::Draw;
+        record.pgn = exportPgn(record);
         return record;
     }
 
@@ -270,6 +339,7 @@ GameRecord MatchRunner::playGame(uint32_t gameId, IUciEngine& whiteEngine, IUciE
         if (!found) {
             record.termination = TerminationType::ProtocolError;
             record.result = GameResult::Draw;
+            record.pgn = exportPgn(record);
             return record;
         }
     }
@@ -377,6 +447,7 @@ GameRecord MatchRunner::playGame(uint32_t gameId, IUciEngine& whiteEngine, IUciE
     record.plyCount = plyCount;
     record.moves = gameMoves;
     record.finalFen = fenFromPosition(pos);
+    record.pgn = exportPgn(record);
 
     return record;
 }
@@ -403,47 +474,48 @@ MatchRecord MatchRunner::runMatch(const MatchConfig& config, IUciEngine* customE
     matchRecord.schemaVersion = "1.0.0";
     matchRecord.config = config;
 
-    uint32_t totalPairs = (config.totalGames + 1) / 2;
     uint32_t gameNumber = 1;
     uint32_t winsA = 0;
     uint32_t drawsA = 0;
     uint32_t lossesA = 0;
+    uint64_t totalPlies = 0;
 
-    for (uint32_t p = 0; p < totalPairs && gameNumber <= config.totalGames; ++p) {
-        const auto& opening = OpeningBook::getOpening(p);
+    const uint32_t gamesPerOpening = config.gamesPerOpening > 0 ? config.gamesPerOpening : 4;
+    const uint32_t numOpenings = static_cast<uint32_t>(OpeningBook::size());
 
-        // Game 2k - 1: Engine A White, Engine B Black
-        {
-            GameRecord g1 = playGame(gameNumber++, *engineA, *engineB, opening, config);
-            matchRecord.games.push_back(g1);
+    while (gameNumber <= config.totalGames) {
+        uint32_t matchIdx = gameNumber - 1;
+        uint32_t openingIdx = (matchIdx / gamesPerOpening) % numOpenings;
+        const auto& opening = OpeningBook::getOpening(openingIdx);
+        uint32_t gameInOpening = matchIdx % gamesPerOpening;
 
-            if (g1.result == GameResult::WhiteWin) {
-                winsA++;
-            } else if (g1.result == GameResult::BlackWin) {
-                lossesA++;
-            } else {
-                drawsA++;
-            }
+        // Color pairing:
+        // Even sub-game (0, 2): Engine A is White, Engine B is Black (C-W/N-B)
+        // Odd sub-game (1, 3): Engine B is White, Engine A is Black (N-W/C-B)
+        bool aIsWhite = (gameInOpening % 2 == 0);
+
+        IUciEngine& white = aIsWhite ? *engineA : *engineB;
+        IUciEngine& black = aIsWhite ? *engineB : *engineA;
+
+        GameRecord gr = playGame(gameNumber, white, black, opening, config);
+        matchRecord.games.push_back(gr);
+        totalPlies += gr.plyCount;
+
+        if (gr.result == GameResult::WhiteWin) {
+            if (aIsWhite) winsA++; else lossesA++;
+        } else if (gr.result == GameResult::BlackWin) {
+            if (aIsWhite) lossesA++; else winsA++;
+        } else {
+            drawsA++;
         }
 
-        if (gameNumber > config.totalGames) break;
-
-        // Game 2k: Engine B White, Engine A Black
-        {
-            GameRecord g2 = playGame(gameNumber++, *engineB, *engineA, opening, config);
-            matchRecord.games.push_back(g2);
-
-            if (g2.result == GameResult::BlackWin) {
-                winsA++;
-            } else if (g2.result == GameResult::WhiteWin) {
-                lossesA++;
-            } else {
-                drawsA++;
-            }
-        }
+        gameNumber++;
     }
 
     matchRecord.stats = Statistics::computeStatistics(winsA, drawsA, lossesA);
+    if (!matchRecord.games.empty()) {
+        matchRecord.stats.avgPly = static_cast<double>(totalPlies) / static_cast<double>(matchRecord.games.size());
+    }
 
     auto tEnd = std::chrono::high_resolution_clock::now();
     matchRecord.totalElapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(tEnd - tStart).count();

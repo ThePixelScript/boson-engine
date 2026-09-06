@@ -64,6 +64,7 @@ struct GameRecord {
     std::string finalFen{};
     int64_t elapsedMs{0};
     std::string engineMetadata{};
+    std::string pgn{};
 };
 
 struct MatchConfig {
@@ -75,7 +76,7 @@ struct MatchConfig {
     std::string buildType{"Release"};
     std::string cpuArch{"x86_64"};
     int threads{1};
-    size_t hashMb{16};
+    size_t hashMb{64};
     int timeControlMs{50}; // fixed movetime in ms
     int fixedDepth{0};     // if > 0, overrides timeControlMs for deterministic fast runs
     std::string openingCorpusVersion{"1.0.0"};
@@ -85,6 +86,7 @@ struct MatchConfig {
     EngineParameters paramsA{};
     EngineParameters paramsB{};
     uint32_t maxPlies{200}; // Safety cutoff to prevent runaway loops
+    uint32_t gamesPerOpening{4};
 };
 
 enum class SPRTDecision : uint8_t {
@@ -131,6 +133,8 @@ struct MatchStatistics {
     uint32_t totalGames{0};
 
     double score{0.5}; // p = (W + 0.5*D) / N
+    double drawRate{0.0};
+    double avgPly{0.0};
     double scorePercentage{50.0};
     double sampleVariance{0.0};
     double standardError{0.0};
@@ -144,6 +148,10 @@ struct MatchStatistics {
     double deltaElo{0.0};
     double eloLower{0.0};
     double eloUpper{0.0};
+
+    // Phase 7-G specific decoupled fields
+    double logisticElo{0.0};
+    double ci95Margin{0.0};
 
     // Aliases for compatibility
     double scoreLow{0.0};

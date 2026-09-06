@@ -25,9 +25,7 @@ eval::ClassicalEvaluator Search::m_defaultEvaluator{};
 eval::IEvaluator* Search::m_evaluator = &Search::m_defaultEvaluator;
 
 eval::IEvaluator& Search::getDefaultNNUEEvaluator() noexcept {
-    static eval::nnue::NetworkModel defaultModel = eval::nnue::createSyntheticModel(1337);
-    static eval::nnue::NNUEEvaluator nnueEval(defaultModel);
-    return nnueEval;
+    return eval::nnue::NNUEEvaluator::getInstance();
 }
 
 void Search::setEvaluator(eval::IEvaluator* evaluator) noexcept {

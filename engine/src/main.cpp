@@ -8,6 +8,7 @@
 #include "benchmark/BenchmarkRunner.hpp"
 #include "config/ParameterRegistry.hpp"
 #include "search/SearchController.hpp"
+#include "eval/nnue/NNUEEvaluator.hpp"
 
 int main(int argc, char* argv[]) {
     Boson::MoveGenerator::initializeTables();
@@ -15,6 +16,9 @@ int main(int argc, char* argv[]) {
     // First pass: extract and apply all --param flags, separating positional/other args
     std::vector<std::string_view> filteredArgs;
     filteredArgs.push_back(argv[0]);
+
+    bool requireNNUE = false;
+    std::string networkPath;
 
     for (int i = 1; i < argc; ++i) {
         std::string_view arg(argv[i]);
@@ -43,8 +47,42 @@ int main(int argc, char* argv[]) {
                 std::cerr << "[ERROR] Failed to set parameter '" << name << "' to '" << val << "'\n";
                 return 1;
             }
+        } else if (arg == "--require-nnue") {
+            requireNNUE = true;
+            Boson::eval::nnue::NNUEEvaluator::setRequireNNUE(true);
+        } else if (arg == "--network" || arg == "--model" || arg == "--nnue") {
+            if (i + 1 >= argc) {
+                std::cerr << "[ERROR] " << arg << " requires a file path\n";
+                return 1;
+            }
+            networkPath = argv[++i];
+        } else if (arg.starts_with("--network=")) {
+            networkPath = std::string(arg.substr(10));
+        } else if (arg.starts_with("--model=")) {
+            networkPath = std::string(arg.substr(8));
+        } else if (arg.starts_with("--nnue=")) {
+            networkPath = std::string(arg.substr(7));
         } else {
             filteredArgs.push_back(arg);
+        }
+    }
+
+    if (requireNNUE) {
+        if (networkPath.empty()) {
+            std::cerr << "[FATAL] --require-nnue specified, but no NNUE network model path provided via --network / --model / --nnue\n";
+            return 1;
+        }
+        if (!Boson::eval::nnue::NNUEEvaluator::loadModelStrict(networkPath)) {
+            std::cerr << "[FATAL] --require-nnue failed to strictly load network model from '" << networkPath << "'\n";
+            return 1;
+        }
+        Boson::ParameterRegistry::getInstance().setParam("Eval_Mode", int64_t{1});
+    } else if (!networkPath.empty()) {
+        if (!Boson::eval::nnue::NNUEEvaluator::loadModel(networkPath, false)) {
+            std::cerr << "[WARN] Failed to load NNUE network model from '" << networkPath << "', falling back to Classical evaluation\n";
+            Boson::ParameterRegistry::getInstance().setParam("Eval_Mode", int64_t{0});
+        } else {
+            Boson::ParameterRegistry::getInstance().setParam("Eval_Mode", int64_t{1});
         }
     }
 
