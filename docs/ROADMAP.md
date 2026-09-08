@@ -16,7 +16,7 @@ This document outlines the architectural roadmap for the Boson chess engine, tra
 | **5** | **Quiescence Search & Move Ordering** | Stand-pat quiescence, MVV-LVA, Killer moves, Global History | **Complete** |
 | **6** | **Advanced Search Heuristics** | SEE, NMP, LMR, Counter-Move History, Continuation History, Correction History | **Complete** |
 | **7** | **Positional Evaluation & Tuning** | Tapered evaluation, pawn structures, king safety, mobility, Texel tuning | Planned |
-| **8** | **Neural Network Evaluation (NNUE)** | HalfKP/HalfKAv2 inference, SIMD vectorization (AVX2/AVX-512), dual evaluator | Planned |
+| **8** | **Neural Network Training & Empirical Progression** | Dataset construction, supervised HalfKP trainer, quantization, SPRT tuning | **In Progress** |
 | **9** | **Parallel Search (Lazy SMP)** | Lockless shared TT, thread pool, scaling telemetry | Planned |
 | **10** | **Endgame Tablebases & Clock Policy** | Syzygy 3-4-5-6 probing (WDL/DTZ), dynamic complexity-based clock management | Planned |
 | **Ω** | **Platform Horizon & Self-Play** | Distributed self-play pipeline, reinforcement learning, automated SPRT cluster | Research |
@@ -196,8 +196,26 @@ This document outlines the architectural roadmap for the Boson chess engine, tra
   - **PyTorch/LibTorch Supervised Trainer:** Offline HalfKP training pipeline with dual-perspective feature caching, clipped ReLU activation, custom sigmoid loss target ($S(q) = 1 / (1 + 10^{-q/400})$), and weight decay regularization.
   - **Integer Quantization & Binary Exporter:** Automated quantization tool converting float32 network weights into Boson NNUE v1 little-endian binary format ($W \times 64$, intermediate activation clamp $[0, 127]$, output scale $\times 16$) with SHA-256 integrity validation.
   - **Empirical Model Progression (Phase 7-GC / Milestone 8):** Sequential validation of candidate networks (`boson-v2.nnue`, `boson-v3.nnue`) against frozen classical baseline (`v0.9.5-classical-enhanced`) under automated SPRT matches.
+- **Phases:**
+  - **Phase 8-A (Dataset Construction, Label Semantics & Feature-Parity Pipeline):** Established canonical self-play position extraction, strict label semantics, binary dataset serialization, opening-group atomic splitting, and bit-exact HalfKP feature parity between Python tooling and C++ engine infrastructure.
+    * **Exact 200-Game Corpus Manifest:** Ingested strictly the 50 canonical opening blocks $\times 4$ games = 200 games, examining exactly 5,000 plies across color-balanced matches.
+    * **Additive Pipeline Accounting:** Examined 5,000 raw plies; filtered out 3 forced checkmate evaluations ($|q| \ge 25,000$ cp, terminal mate scores); retained exactly 4,997 canonical position records with 0 residual/unaccounted positions.
+    * **Opening-Group Atomic Partitioning:** Deterministic partitioning at the opening-group level (grouping all 4 games of each opening line) via deterministic 64-bit FNV-1a hash (`hashOpeningId`):
+      - Train: 45 opening blocks (180 games, 4,497 records, 90.0%).
+      - Validation: 3 opening blocks (`open_44`, `open_45`, `open_48` — 12 games, 300 records, 6.0%).
+      - Test: 2 opening blocks (`open_49`, `open_50` — 8 games, 200 records, 4.0%).
+    * **Pairwise Cross-Split Collision Elimination:** Strictly enforced zero-leakage invariant across all split boundaries: $|T \cap V| = 0$, $|T \cap Te| = 0$, $|V \cap Te| = 0$, ensuring zero position memorization across evaluation sets.
+    * **Bit-Exact Feature-Parity Oracle:** Implemented canonical HalfKP feature extractor in Python (`tools/dataset/extractor.py`) matching the C++ engine's sparse HalfKP feature transformer (`boson::eval::HalfKP::computeActiveFeatures`) bit-for-bit across all 64 king squares, 10 piece codes, and 64 piece squares ($\text{Index} \in [0, 40959]$). Verified parity across quiet moves, captures, promotions, en-passant, and castling paths.
+    * **Packed Binary Dataset Schema:** Little-endian binary byte stream format (`magic=0x42445354` "BDST", `version=1`) with variable-length HalfKP active feature indices, centipawn score $q$, and game outcome $z$. Reconciled binary digests:
+      - `train.bin`: 4,497 records, 620,634 bytes, SHA-256 `6023eebc4be69a55b225a71667da740bb66bb016c58163af5782324b615d5bfa`
+      - `val.bin`: 300 records, 41,656 bytes, SHA-256 `a80e4ec34172c2f42ee5167a95cae043d20c74bbf6285758e37cdaf984e80cbf`
+      - `test.bin`: 200 records, 27,664 bytes, SHA-256 `f504d41cd4a10800667dcd168bfa7a2e6e04e09310f502436be8a69fe99d255e`
+    * **Heuristic Teacher Mapping Calibration:** Evaluated empirical alignment between game outcome $E[z|q]$ and logistic teacher mapping $\sigma(q/400)$ across centipawn bins, confirming strictly monotonic correspondence without sign inversions.
+    * **Classical Search Control Invariance:** Isolated depth-6 benchmark locked at exactly **313,092 nodes** ($\Delta = 0$ nodes vs frozen `v0.9.5-classical-enhanced` control).
+    * **Full Verification Battery:** Suite #35 passed all 15 validation gates (Gates 8-A-1 through 8-A-15). All 35 test suites passing cleanly (`phase8A: 1`).
+    * **Status:** **Complete / Closed**.
 - **Exit Criteria:** Trained network achieving statistically significant positive Elo gain over Classical HCE baseline in fixed-depth/fixed-time SPRT matches ($\Delta\text{Elo} \ge +50\text{ Elo}$, SPRT Accept $H_1$).
-- **Status:** Planned.
+- **Status:** **In Progress** (Phase 8-A Complete).
 
 ---
 

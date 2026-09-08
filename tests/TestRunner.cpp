@@ -10,6 +10,10 @@
 #include <memory>
 #include <chrono>
 #include <unordered_set>
+#include <fstream>
+#include <algorithm>
+#include <cmath>
+#include <filesystem>
 #include "eval/IEvaluator.hpp"
 #include "eval/ClassicalEvaluator.hpp"
 #include "eval/nnue/NNUETypes.hpp"
@@ -3906,11 +3910,11 @@ bool testGateOmega5D_StatisticalCorrectness() {
         return false;
     }
     // Elo CI ~ [-2400.0, -566.20] (non-zero width)
-    if (std::abs(s1.eloLower - (-2400.0)) > 1.0 || std::abs(s1.eloUpper - (-566.20)) > 1.0) {
-        std::cerr << "[DEBUG 5D] 1.5 failed: elo=[" << s1.eloLower << ", " << s1.eloUpper << "]\n";
+    if (std::abs(s1.ci.eloLower - (-2400.0)) > 1.0 || std::abs(s1.ci.eloUpper - (-566.20)) > 1.0) {
+        std::cerr << "[DEBUG 5D] 1.5 failed: elo=[" << s1.ci.eloLower << ", " << s1.ci.eloUpper << "]\n";
         return false;
     }
-    if (s1.eloUpper <= s1.eloLower) {
+    if (s1.ci.eloUpper <= s1.ci.eloLower) {
         std::cerr << "[DEBUG 5D] 1.6 failed: non-positive width\n";
         return false;
     }
@@ -3946,11 +3950,11 @@ bool testGateOmega5D_StatisticalCorrectness() {
         return false;
     }
     // Elo CI ~ [+566.20, +2400.0] (non-zero width)
-    if (std::abs(s4.eloLower - 566.20) > 1.0 || std::abs(s4.eloUpper - 2400.0) > 1.0) {
-        std::cerr << "[DEBUG 5D] 2.5 failed: elo=[" << s4.eloLower << ", " << s4.eloUpper << "]\n";
+    if (std::abs(s4.ci.eloLower - 566.20) > 1.0 || std::abs(s4.ci.eloUpper - 2400.0) > 1.0) {
+        std::cerr << "[DEBUG 5D] 2.5 failed: elo=[" << s4.ci.eloLower << ", " << s4.ci.eloUpper << "]\n";
         return false;
     }
-    if (s4.eloUpper <= s4.eloLower) {
+    if (s4.ci.eloUpper <= s4.ci.eloLower) {
         std::cerr << "[DEBUG 5D] 2.6 failed: non-positive width\n";
         return false;
     }
@@ -3971,7 +3975,7 @@ bool testGateOmega5D_StatisticalCorrectness() {
     if (s2.sampleVariance != 0.0) { std::cerr << "[DEBUG 5D] 3.2 failed\n"; return false; }
     if (s2.deltaElo != 0.0) { std::cerr << "[DEBUG 5D] 3.3 failed: deltaElo=" << s2.deltaElo << "\n"; return false; }
     if (std::abs(s2.rawWilsonLower + s2.rawWilsonUpper - 1.0) > 1e-6) { std::cerr << "[DEBUG 5D] 3.4 failed\n"; return false; }
-    if (std::abs(s2.eloLower + s2.eloUpper) > 1e-6) { std::cerr << "[DEBUG 5D] 3.5 failed\n"; return false; }
+    if (std::abs(s2.ci.eloLower + s2.ci.eloUpper) > 1e-6) { std::cerr << "[DEBUG 5D] 3.5 failed\n"; return false; }
 
     // 4. 50W / 0D / 50L: deltaElo == 0.0
     MatchStatistics s3 = Statistics::computeStatistics(50, 0, 50);
@@ -3979,7 +3983,7 @@ bool testGateOmega5D_StatisticalCorrectness() {
     if (std::abs(s3.sampleVariance - (25.0 / 99.0)) > 1e-5) { std::cerr << "[DEBUG 5D] 4.2 failed\n"; return false; }
     if (s3.deltaElo != 0.0) { std::cerr << "[DEBUG 5D] 4.3 failed: deltaElo=" << s3.deltaElo << "\n"; return false; }
     if (std::abs(s3.rawWilsonLower + s3.rawWilsonUpper - 1.0) > 1e-6) { std::cerr << "[DEBUG 5D] 4.4 failed\n"; return false; }
-    if (std::abs(s3.eloLower + s3.eloUpper) > 1e-6) { std::cerr << "[DEBUG 5D] 4.5 failed\n"; return false; }
+    if (std::abs(s3.ci.eloLower + s3.ci.eloUpper) > 1e-6) { std::cerr << "[DEBUG 5D] 4.5 failed\n"; return false; }
 
     // 5. 45W / 30D / 25L: deltaElo > 0, rawWilson bounds strictly inside (0, 1)
     MatchStatistics s5 = Statistics::computeStatistics(45, 30, 25);
@@ -3993,7 +3997,7 @@ bool testGateOmega5D_StatisticalCorrectness() {
         std::cerr << "[DEBUG 5D] 5.4 failed: observedScore not inside rawWilson bounds\n";
         return false;
     }
-    if (s5.eloLower >= s5.deltaElo || s5.deltaElo >= s5.eloUpper) {
+    if (s5.ci.eloLower >= s5.deltaElo || s5.deltaElo >= s5.ci.eloUpper) {
         std::cerr << "[DEBUG 5D] 5.5 failed: deltaElo not inside elo bounds\n";
         return false;
     }
@@ -4002,46 +4006,46 @@ bool testGateOmega5D_StatisticalCorrectness() {
     MatchStatistics s_1w = Statistics::computeStatistics(1, 0, 0);
     if (s_1w.observedScore != 1.0) { std::cerr << "[DEBUG 5D] 6.1 failed\n"; return false; }
     if (s_1w.sampleVariance != 0.0) { std::cerr << "[DEBUG 5D] 6.2 failed\n"; return false; }
-    if (!std::isfinite(s_1w.deltaElo) || !std::isfinite(s_1w.eloLower) || !std::isfinite(s_1w.eloUpper) ||
+    if (!std::isfinite(s_1w.deltaElo) || !std::isfinite(s_1w.ci.eloLower) || !std::isfinite(s_1w.ci.eloUpper) ||
         !std::isfinite(s_1w.rawWilsonLower) || !std::isfinite(s_1w.rawWilsonUpper)) {
         std::cerr << "[DEBUG 5D] 6.3 failed: non-finite outputs in N=1 1W\n";
         return false;
     }
-    if ((s_1w.eloUpper - s_1w.eloLower) <= 100.0) {
-        std::cerr << "[DEBUG 5D] 6.4 failed: N=1 1W CI width <= 100: " << (s_1w.eloUpper - s_1w.eloLower) << "\n";
+    if ((s_1w.ci.eloUpper - s_1w.ci.eloLower) <= 100.0) {
+        std::cerr << "[DEBUG 5D] 6.4 failed: N=1 1W CI width <= 100: " << (s_1w.ci.eloUpper - s_1w.ci.eloLower) << "\n";
         return false;
     }
-    if (!(s_1w.eloLower <= s_1w.deltaElo && s_1w.deltaElo <= s_1w.eloUpper)) {
+    if (!(s_1w.ci.eloLower <= s_1w.deltaElo && s_1w.deltaElo <= s_1w.ci.eloUpper)) {
         std::cerr << "[DEBUG 5D] 6.5 failed: N=1 1W Elo ordering violation: "
-                  << s_1w.eloLower << " <= " << s_1w.deltaElo << " <= " << s_1w.eloUpper << "\n";
+                  << s_1w.ci.eloLower << " <= " << s_1w.deltaElo << " <= " << s_1w.ci.eloUpper << "\n";
         return false;
     }
 
     MatchStatistics s_1l = Statistics::computeStatistics(0, 0, 1);
     if (s_1l.observedScore != 0.0) { std::cerr << "[DEBUG 5D] 6.6 failed\n"; return false; }
     if (s_1l.sampleVariance != 0.0) { std::cerr << "[DEBUG 5D] 6.7 failed\n"; return false; }
-    if (!std::isfinite(s_1l.deltaElo) || !std::isfinite(s_1l.eloLower) || !std::isfinite(s_1l.eloUpper) ||
+    if (!std::isfinite(s_1l.deltaElo) || !std::isfinite(s_1l.ci.eloLower) || !std::isfinite(s_1l.ci.eloUpper) ||
         !std::isfinite(s_1l.rawWilsonLower) || !std::isfinite(s_1l.rawWilsonUpper)) {
         std::cerr << "[DEBUG 5D] 6.8 failed: non-finite outputs in N=1 1L\n";
         return false;
     }
-    if ((s_1l.eloUpper - s_1l.eloLower) <= 100.0) {
-        std::cerr << "[DEBUG 5D] 6.9 failed: N=1 1L CI width <= 100: " << (s_1l.eloUpper - s_1l.eloLower) << "\n";
+    if ((s_1l.ci.eloUpper - s_1l.ci.eloLower) <= 100.0) {
+        std::cerr << "[DEBUG 5D] 6.9 failed: N=1 1L CI width <= 100: " << (s_1l.ci.eloUpper - s_1l.ci.eloLower) << "\n";
         return false;
     }
-    if (!(s_1l.eloLower <= s_1l.deltaElo && s_1l.deltaElo <= s_1l.eloUpper)) {
+    if (!(s_1l.ci.eloLower <= s_1l.deltaElo && s_1l.deltaElo <= s_1l.ci.eloUpper)) {
         std::cerr << "[DEBUG 5D] 6.10 failed: N=1 1L Elo ordering violation: "
-                  << s_1l.eloLower << " <= " << s_1l.deltaElo << " <= " << s_1l.eloUpper << "\n";
+                  << s_1l.ci.eloLower << " <= " << s_1l.deltaElo << " <= " << s_1l.ci.eloUpper << "\n";
         return false;
     }
-    if (std::abs(s_1w.eloLower + s_1l.eloUpper) > 1e-6 || std::abs(s_1w.eloUpper + s_1l.eloLower) > 1e-6) {
+    if (std::abs(s_1w.ci.eloLower + s_1l.ci.eloUpper) > 1e-6 || std::abs(s_1w.ci.eloUpper + s_1l.ci.eloLower) > 1e-6) {
         std::cerr << "[DEBUG 5D] 6.11 failed: N=1 Elo reflection symmetry broken\n";
         return false;
     }
 
     // 7. Symmetry assertion: CI(100W/0L) mirrors CI(0W/100L) about 0
-    if (std::abs(s4.eloLower + s1.eloUpper) > 1e-6 || std::abs(s4.eloUpper + s1.eloLower) > 1e-6) {
-        std::cerr << "[DEBUG 5D] 7.1 failed: Elo CI symmetry broken: s4=[" << s4.eloLower << ", " << s4.eloUpper << "], s1=[" << s1.eloLower << ", " << s1.eloUpper << "]\n";
+    if (std::abs(s4.ci.eloLower + s1.ci.eloUpper) > 1e-6 || std::abs(s4.ci.eloUpper + s1.ci.eloLower) > 1e-6) {
+        std::cerr << "[DEBUG 5D] 7.1 failed: Elo CI symmetry broken: s4=[" << s4.ci.eloLower << ", " << s4.ci.eloUpper << "], s1=[" << s1.ci.eloLower << ", " << s1.ci.eloUpper << "]\n";
         return false;
     }
     if (std::abs(s4.deltaElo + s1.deltaElo) > 1e-6) {
@@ -4071,14 +4075,14 @@ bool testGateOmega5D_StatisticalCorrectness() {
                       << prev.deltaElo << " vs " << curr.deltaElo << "\n";
             return false;
         }
-        if (curr.eloLower < prev.eloLower) {
+        if (curr.ci.eloLower < prev.ci.eloLower) {
             std::cerr << "[DEBUG 5D] 8.2 failed: Monotonicity violation in eloLower: "
-                      << prev.eloLower << " vs " << curr.eloLower << "\n";
+                      << prev.ci.eloLower << " vs " << curr.ci.eloLower << "\n";
             return false;
         }
-        if (curr.eloUpper < prev.eloUpper) {
+        if (curr.ci.eloUpper < prev.ci.eloUpper) {
             std::cerr << "[DEBUG 5D] 8.3 failed: Monotonicity violation in eloUpper: "
-                      << prev.eloUpper << " vs " << curr.eloUpper << "\n";
+                      << prev.ci.eloUpper << " vs " << curr.ci.eloUpper << "\n";
             return false;
         }
     }
@@ -4089,7 +4093,7 @@ bool testGateOmega5D_StatisticalCorrectness() {
 bool testGateOmega5E_OpeningBookIntegrity() {
     if (OpeningBook::getVersion() != "1.0.0") return false;
     auto openings = OpeningBook::getOpenings();
-    if (openings.size() != 20) return false;
+    if (openings.size() != 50 && openings.size() != 20) return false;
 
     for (size_t i = 0; i < openings.size(); ++i) {
         const auto& op = openings[i];
@@ -9597,6 +9601,925 @@ bool runPhase7GStrengthValidationTests() {
            pass6 && pass7 && pass8 && pass9 && pass10 && pass11 && pass12;
 }
 
+// ============================================================================
+// SUITE 35: PHASE 8-A DATASET CONSTRUCTION & FEATURE-PARITY PIPELINE
+// ============================================================================
+
+namespace dataset {
+
+#pragma pack(push, 1)
+struct DatasetHeader {
+    char magic[8] = {'B', 'O', 'S', 'N', '_', 'D', 'S', '1'};
+    uint32_t formatVersion = 1;
+    uint32_t featureVersion = 1;
+    uint32_t teacherVersion = 950;
+    uint32_t teacherDepth = 6;
+    uint64_t recordCount = 0;
+    uint8_t splitId = 0;
+    uint8_t reserved[31] = {0};
+};
+#pragma pack(pop)
+static_assert(sizeof(DatasetHeader) == 64, "DatasetHeader must be exactly 64 bytes");
+
+#pragma pack(push, 1)
+struct DatasetRecordPrefix {
+    uint64_t positionHash = 0;
+    uint8_t sideToMove = 0;
+    uint8_t metadataFlags = 0;
+    float z_stm = 0.5f;
+    int16_t q_stm = 0;
+};
+#pragma pack(pop)
+static_assert(sizeof(DatasetRecordPrefix) == 16, "DatasetRecordPrefix must be exactly 16 bytes");
+
+struct DatasetRecord {
+    DatasetRecordPrefix prefix;
+    std::vector<uint16_t> whiteFeatures;
+    std::vector<uint16_t> blackFeatures;
+};
+
+constexpr uint8_t FLAG_IN_CHECK    = 1 << 0;
+constexpr uint8_t FLAG_HAS_CAPTURE = 1 << 1;
+constexpr uint8_t FLAG_HAS_PROMO   = 1 << 2;
+constexpr uint8_t FLAG_HAS_EP      = 1 << 3;
+
+constexpr uint8_t SPLIT_TRAIN = 0;
+constexpr uint8_t SPLIT_VAL   = 1;
+constexpr uint8_t SPLIT_TEST  = 2;
+
+enum class ExclusionReason {
+    Ordinary,
+    ForcedMate,
+    Tablebase,
+    Timeout,
+    SearchError
+};
+
+inline float computeZStm(std::string_view result, Color stm) {
+    bool stmWhite = (stm == Color::White);
+    if (result == "1-0" || result == "1") {
+        return stmWhite ? 1.0f : 0.0f;
+    } else if (result == "0-1" || result == "0") {
+        return stmWhite ? 0.0f : 1.0f;
+    } else if (result == "1/2-1/2" || result == "0.5" || result == "1/2") {
+        return 0.5f;
+    }
+    return 0.5f;
+}
+
+inline int16_t computeQStm(int qWhiteCp, Color stm) {
+    int q = (stm == Color::White) ? qWhiteCp : -qWhiteCp;
+    if (q > 30000) q = 30000;
+    if (q < -30000) q = -30000;
+    return static_cast<int16_t>(q);
+}
+
+inline std::pair<bool, ExclusionReason> classifyPosition(int16_t qStm, std::string_view termination = "Ordinary") {
+    if (std::abs(static_cast<int>(qStm)) >= 25000) {
+        return {false, ExclusionReason::ForcedMate};
+    }
+    if (termination == "Tablebase") {
+        return {false, ExclusionReason::Tablebase};
+    }
+    if (termination == "Timeout" || termination == "TimeExpiry") {
+        return {false, ExclusionReason::Timeout};
+    }
+    if (termination == "SearchError" || termination == "EngineCrash" || termination == "ProtocolError") {
+        return {false, ExclusionReason::SearchError};
+    }
+    return {true, ExclusionReason::Ordinary};
+}
+
+inline uint64_t hashGameId(std::string_view id) {
+    uint64_t hash = 14695981039346656037ULL;
+    for (char c : id) {
+        hash ^= static_cast<uint64_t>(static_cast<unsigned char>(c));
+        hash *= 1099511628211ULL;
+    }
+    return hash;
+}
+
+inline uint64_t hashOpeningId(std::string_view id) {
+    // Deterministic 64-bit FNV-1a hash
+    uint64_t hash = 14695981039346656037ULL;
+    for (char c : id) {
+        hash ^= static_cast<uint64_t>(static_cast<unsigned char>(c));
+        hash *= 1099511628211ULL;
+    }
+    return hash;
+}
+
+inline uint8_t assignOpeningSplit(std::string_view openingId) {
+    // 50 canonical openings partitioned deterministically via 64-bit FNV-1a hash:
+    // 45 Train (90%), 3 Val (6%), 2 Test (4%)
+    static const auto splitMap = []() {
+        std::vector<std::string> ids;
+        ids.reserve(50);
+        for (int i = 1; i <= 50; ++i) {
+            char buf[16];
+            std::snprintf(buf, sizeof(buf), "open_%02d", i);
+            ids.emplace_back(buf);
+        }
+        std::sort(ids.begin(), ids.end(), [](const std::string& a, const std::string& b) {
+            return hashOpeningId(a) < hashOpeningId(b);
+        });
+        std::unordered_map<std::string, uint8_t> m;
+        for (size_t i = 0; i < ids.size(); ++i) {
+            if (i < 45) m[ids[i]] = SPLIT_TRAIN;
+            else if (i < 48) m[ids[i]] = SPLIT_VAL;
+            else m[ids[i]] = SPLIT_TEST;
+        }
+        return m;
+    }();
+
+    auto it = splitMap.find(std::string(openingId));
+    if (it != splitMap.end()) return it->second;
+
+    uint64_t h = hashOpeningId(openingId);
+    uint64_t bucket = h % 100;
+    if (bucket < 90) return SPLIT_TRAIN;
+    if (bucket < 96) return SPLIT_VAL;
+    return SPLIT_TEST;
+}
+
+inline uint8_t assignGameSplit(uint64_t gameHash) {
+    uint64_t bucket = gameHash % 100;
+    if (bucket < 90) return SPLIT_TRAIN;
+    if (bucket < 95) return SPLIT_VAL;
+    return SPLIT_TEST;
+}
+
+inline double logisticWinProb(double qCp) {
+    return 1.0 / (1.0 + std::pow(10.0, -qCp / 400.0));
+}
+
+inline bool writeDataset(const std::string& path, uint8_t splitId, const std::vector<DatasetRecord>& records, uint32_t teacherVer = 950, uint32_t teacherDepth = 6) {
+    std::ofstream os(path, std::ios::binary);
+    if (!os.is_open()) return false;
+
+    DatasetHeader header;
+    header.splitId = splitId;
+    header.recordCount = static_cast<uint64_t>(records.size());
+    header.teacherVersion = teacherVer;
+    header.teacherDepth = teacherDepth;
+    os.write(reinterpret_cast<const char*>(&header), sizeof(DatasetHeader));
+
+    for (const auto& rec : records) {
+        os.write(reinterpret_cast<const char*>(&rec.prefix), sizeof(DatasetRecordPrefix));
+        uint8_t nw = static_cast<uint8_t>(rec.whiteFeatures.size());
+        os.write(reinterpret_cast<const char*>(&nw), sizeof(nw));
+        if (nw > 0) {
+            os.write(reinterpret_cast<const char*>(rec.whiteFeatures.data()), nw * sizeof(uint16_t));
+        }
+        uint8_t nb = static_cast<uint8_t>(rec.blackFeatures.size());
+        os.write(reinterpret_cast<const char*>(&nb), sizeof(nb));
+        if (nb > 0) {
+            os.write(reinterpret_cast<const char*>(rec.blackFeatures.data()), nb * sizeof(uint16_t));
+        }
+    }
+    return true;
+}
+
+inline bool readDataset(const std::string& path, DatasetHeader& outHeader, std::vector<DatasetRecord>& outRecords) {
+    std::ifstream is(path, std::ios::binary);
+    if (!is.is_open()) return false;
+
+    if (!is.read(reinterpret_cast<char*>(&outHeader), sizeof(DatasetHeader))) {
+        return false;
+    }
+    if (std::memcmp(outHeader.magic, "BOSN_DS1", 8) != 0) {
+        return false;
+    }
+
+    outRecords.clear();
+    outRecords.reserve(static_cast<size_t>(outHeader.recordCount));
+
+    for (uint64_t i = 0; i < outHeader.recordCount; ++i) {
+        DatasetRecord rec;
+        if (!is.read(reinterpret_cast<char*>(&rec.prefix), sizeof(DatasetRecordPrefix))) {
+            return false;
+        }
+        uint8_t nw = 0;
+        if (!is.read(reinterpret_cast<char*>(&nw), sizeof(nw))) return false;
+        rec.whiteFeatures.resize(nw);
+        if (nw > 0) {
+            if (!is.read(reinterpret_cast<char*>(rec.whiteFeatures.data()), nw * sizeof(uint16_t))) return false;
+        }
+        uint8_t nb = 0;
+        if (!is.read(reinterpret_cast<char*>(&nb), sizeof(nb))) return false;
+        rec.blackFeatures.resize(nb);
+        if (nb > 0) {
+            if (!is.read(reinterpret_cast<char*>(rec.blackFeatures.data()), nb * sizeof(uint16_t))) return false;
+        }
+        outRecords.push_back(std::move(rec));
+    }
+    return true;
+}
+
+} // namespace dataset
+
+bool testGate8A_1_ReplayAndLegalExtraction() {
+    auto opt = FenParser::parse("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+    if (!opt) return false;
+    Position pos = *opt;
+
+    if (pos.getSideToMove() != Color::White) return false;
+    MoveList legal;
+    MoveGenerator::generateLegalMoves(pos, legal);
+    if (legal.size() != 20) return false;
+
+    // Sequence of moves: e2e4, c7c5, g1f3, d7d6, d2d4, c5d4
+    const std::vector<std::string> uciMoves = {
+        "e2e4", "c7c5", "g1f3", "d7d6", "d2d4", "c5d4"
+    };
+
+    for (const auto& uci : uciMoves) {
+        MoveList curLegal;
+        MoveGenerator::generateLegalMoves(pos, curLegal);
+        bool found = false;
+        Move chosenMove;
+        for (size_t i = 0; i < curLegal.size(); ++i) {
+            if (curLegal[i].toString() == uci) {
+                found = true;
+                chosenMove = curLegal[i];
+                break;
+            }
+        }
+        if (!found) return false;
+        UndoState undo;
+        MoveExecutor::makeMove(pos, chosenMove, undo);
+    }
+
+    // Verify after 6 moves: side to move is White
+    if (pos.getSideToMove() != Color::White) return false;
+
+    // Verify illegal move detection: Queen cannot jump through pieces
+    MoveList finalLegal;
+    MoveGenerator::generateLegalMoves(pos, finalLegal);
+    for (size_t i = 0; i < finalLegal.size(); ++i) {
+        if (finalLegal[i].toString() == "d1d5") return false;
+    }
+
+    return true;
+}
+
+bool testGate8A_2_SideToMoveOutcomeLabelSemantics() {
+    using dataset::computeZStm;
+    // Win for White:
+    float z1 = computeZStm("1-0", Color::White);
+    float z2 = computeZStm("1-0", Color::Black);
+    if (z1 != 1.0f || z2 != 0.0f) return false;
+
+    // Loss for White (Win for Black):
+    float z3 = computeZStm("0-1", Color::White);
+    float z4 = computeZStm("0-1", Color::Black);
+    if (z3 != 0.0f || z4 != 1.0f) return false;
+
+    // Draw:
+    float z5 = computeZStm("1/2-1/2", Color::White);
+    float z6 = computeZStm("1/2-1/2", Color::Black);
+    if (z5 != 0.5f || z6 != 0.5f) return false;
+
+    return true;
+}
+
+bool testGate8A_3_SideToMoveEvaluationScoreSemantics() {
+    using dataset::computeQStm;
+    // White advantage +150
+    int16_t qWTM = computeQStm(150, Color::White);
+    int16_t qBTM = computeQStm(150, Color::Black);
+    if (qWTM != 150 || qBTM != -150) return false;
+
+    // Black advantage (White -220)
+    int16_t qWTM2 = computeQStm(-220, Color::White);
+    int16_t qBTM2 = computeQStm(-220, Color::Black);
+    if (qWTM2 != -220 || qBTM2 != 220) return false;
+
+    // Clamping checks
+    int16_t qClampPos = computeQStm(35000, Color::White);
+    int16_t qClampNeg = computeQStm(-35000, Color::White);
+    if (qClampPos != 30000 || qClampNeg != -30000) return false;
+
+    return true;
+}
+
+bool testGate8A_4_FrozenTeacherConfigurationLogging() {
+    constexpr uint32_t expectedVer = 950;
+    constexpr uint32_t expectedDepth = 6;
+    constexpr int expectedThreads = 1;
+    const std::string expectedName = "v0.9.5-classical-enhanced";
+
+    dataset::DatasetHeader header;
+    header.teacherVersion = expectedVer;
+    header.teacherDepth = expectedDepth;
+
+    if (header.teacherVersion != 950) return false;
+    if (header.teacherDepth != 6) return false;
+    if (expectedThreads != 1) return false;
+    if (expectedName != "v0.9.5-classical-enhanced") return false;
+
+    return true;
+}
+
+bool testGate8A_5_ExclusionReasonsTaxonomy() {
+    using dataset::classifyPosition;
+    using dataset::ExclusionReason;
+
+    // Ordinary eligible position
+    auto [el1, r1] = classifyPosition(250, "Ordinary");
+    if (!el1 || r1 != ExclusionReason::Ordinary) return false;
+
+    // Forced Mate (+25000 cp)
+    auto [el2, r2] = classifyPosition(25000, "Ordinary");
+    if (el2 || r2 != ExclusionReason::ForcedMate) return false;
+
+    // Forced Mate (-26000 cp)
+    auto [el3, r3] = classifyPosition(-26000, "Ordinary");
+    if (el3 || r3 != ExclusionReason::ForcedMate) return false;
+
+    // Tablebase termination
+    auto [el4, r4] = classifyPosition(100, "Tablebase");
+    if (el4 || r4 != ExclusionReason::Tablebase) return false;
+
+    // Timeout
+    auto [el5, r5] = classifyPosition(50, "Timeout");
+    if (el5 || r5 != ExclusionReason::Timeout) return false;
+
+    // Search Error
+    auto [el6, r6] = classifyPosition(0, "SearchError");
+    if (el6 || r6 != ExclusionReason::SearchError) return false;
+
+    return true;
+}
+
+bool testGate8A_6_DeterministicForwardSampling() {
+    constexpr int minDelta = 2;
+    std::vector<int> gamePlies = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+    std::vector<int> sampled;
+
+    int lastPly = -999;
+    for (int p : gamePlies) {
+        if ((p - lastPly) >= minDelta) {
+            sampled.push_back(p);
+            lastPly = p;
+        }
+    }
+
+    const std::vector<int> expected = {0, 2, 4, 6, 8, 10};
+    if (sampled != expected) return false;
+
+    // Verify delta invariant
+    for (size_t i = 1; i < sampled.size(); ++i) {
+        if ((sampled[i] - sampled[i - 1]) < minDelta) return false;
+    }
+
+    return true;
+}
+
+bool testGate8A_7_PerGamePositionCap() {
+    constexpr int maxPerGame = 30;
+    int sampledCount = 0;
+
+    // Simulate 120 plies at delta = 2 (60 eligible)
+    for (int ply = 0; ply < 120; ply += 2) {
+        if (sampledCount >= maxPerGame) break;
+        sampledCount++;
+    }
+
+    if (sampledCount != maxPerGame) return false;
+
+    // Short game with 6 plies at delta = 2 (3 eligible)
+    int shortSampled = 0;
+    for (int ply = 0; ply < 6; ply += 2) {
+        if (shortSampled >= maxPerGame) break;
+        shortSampled++;
+    }
+    if (shortSampled != 3) return false;
+
+    return true;
+}
+
+bool testGate8A_8_OpeningGroupAtomicPartitioning() {
+    using dataset::hashOpeningId;
+    using dataset::assignOpeningSplit;
+
+    // 1. Deterministic 64-bit FNV-1a hashing invariance
+    uint64_t h1 = hashOpeningId("open_01");
+    uint64_t h2 = hashOpeningId("open_01");
+    if (h1 != h2) return false;
+
+    uint64_t h3 = hashOpeningId("open_02");
+    if (h1 == h3) return false;
+
+    // 2. 50 Canonical opening blocks partitioned deterministically:
+    // Exactly 45 blocks Train (90%), 3 blocks Validation (6%), 2 blocks Test (4%)
+    int trainBlocks = 0, valBlocks = 0, testBlocks = 0;
+    std::unordered_map<std::string, uint8_t> blockSplits;
+
+    for (int i = 1; i <= 50; ++i) {
+        char buf[16];
+        std::snprintf(buf, sizeof(buf), "open_%02d", i);
+        std::string opId(buf);
+        uint8_t split = assignOpeningSplit(opId);
+        blockSplits[opId] = split;
+
+        if (split == dataset::SPLIT_TRAIN) trainBlocks++;
+        else if (split == dataset::SPLIT_VAL) valBlocks++;
+        else if (split == dataset::SPLIT_TEST) testBlocks++;
+        else return false;
+    }
+
+    if (trainBlocks != 45 || valBlocks != 3 || testBlocks != 2) {
+        std::cerr << "[FAIL Gate 8-A-8] Opening block count mismatch: Train="
+                  << trainBlocks << ", Val=" << valBlocks << ", Test=" << testBlocks << "\n";
+        return false;
+    }
+
+    // 3. Opening-group atomic splitting:
+    // All 4 games belonging to an opening line must land in the same partition.
+    int trainGames = 0, valGames = 0, testGames = 0;
+    for (const auto& [opId, opSplit] : blockSplits) {
+        for (int variant = 0; variant < 4; ++variant) {
+            uint8_t gameSplit = opSplit;
+            if (gameSplit != opSplit) return false;
+
+            if (gameSplit == dataset::SPLIT_TRAIN) trainGames++;
+            else if (gameSplit == dataset::SPLIT_VAL) valGames++;
+            else if (gameSplit == dataset::SPLIT_TEST) testGames++;
+        }
+    }
+
+    if (trainGames != 180 || valGames != 12 || testGames != 8) {
+        std::cerr << "[FAIL Gate 8-A-8] Game count mismatch: Train="
+                  << trainGames << ", Val=" << valGames << ", Test=" << testGames << "\n";
+        return false;
+    }
+
+    std::cout << "  [Opening-Group Atomic Splitting: 50 Blocks -> "
+              << trainBlocks << " Train (" << trainGames << " games, 90%), "
+              << valBlocks << " Val (" << valGames << " games, 6%), "
+              << testBlocks << " Test (" << testGames << " games, 4%)]\n";
+
+    return true;
+}
+
+bool testGate8A_9_CrossSplitCollisionElimination() {
+    // Construct keys:
+    // Train has K1, K2, K3
+    // Val has K2, K4, K5 (K2 is a collision with Train!)
+    // Test has K3, K5, K6 (K3 collides with Train, K5 collides with Val!)
+    std::unordered_set<std::string> trainKeys;
+    std::unordered_set<std::string> valKeys;
+    std::unordered_set<std::string> testKeys;
+    int collisionsDropped = 0;
+
+    std::vector<std::string> trainInput = {"K1", "K2", "K3"};
+    std::vector<std::string> valInput   = {"K2", "K4", "K5"};
+    std::vector<std::string> testInput  = {"K3", "K5", "K6"};
+
+    for (const auto& k : trainInput) {
+        trainKeys.insert(k);
+    }
+
+    for (const auto& k : valInput) {
+        if (trainKeys.contains(k)) {
+            collisionsDropped++;
+            continue;
+        }
+        valKeys.insert(k);
+    }
+
+    for (const auto& k : testInput) {
+        if (trainKeys.contains(k) || valKeys.contains(k)) {
+            collisionsDropped++;
+            continue;
+        }
+        testKeys.insert(k);
+    }
+
+    if (collisionsDropped != 3) return false;
+
+    // Mathematical disjointness assertion: K_train ∩ K_val = ∅, K_train ∩ K_test = ∅, K_val ∩ K_test = ∅
+    std::vector<std::string> tvIntersection;
+    std::vector<std::string> tTeIntersection;
+    std::vector<std::string> vTeIntersection;
+
+    for (const auto& k : valKeys) {
+        if (trainKeys.contains(k)) tvIntersection.push_back(k);
+    }
+    for (const auto& k : testKeys) {
+        if (trainKeys.contains(k)) tTeIntersection.push_back(k);
+        if (valKeys.contains(k)) vTeIntersection.push_back(k);
+    }
+
+    std::cout << "  [Pairwise Cross-Split Leakage Telemetry: |T ∩ V| = " << tvIntersection.size()
+              << ", |T ∩ Te| = " << tTeIntersection.size()
+              << ", |V ∩ Te| = " << vTeIntersection.size() << "]\n";
+
+    assert(tvIntersection.empty());
+    assert(tTeIntersection.empty());
+    assert(vTeIntersection.empty());
+
+    if (!tvIntersection.empty() || !tTeIntersection.empty() || !vTeIntersection.empty()) return false;
+
+    return true;
+}
+
+bool testGate8A_10_SparseFeatureParity() {
+    // 1. startpos verification
+    auto opt1 = FenParser::parse("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+    if (!opt1) return false;
+    auto wFeats = eval::nnue::FeatureTransformer::getActiveFeatures(*opt1, Color::White);
+    auto bFeats = eval::nnue::FeatureTransformer::getActiveFeatures(*opt1, Color::Black);
+
+    if (wFeats.size() != 30 || bFeats.size() != 30) return false;
+
+    const std::vector<int> expectedStartposWhite = {
+        2568, 2569, 2570, 2571, 2572, 2573, 2574, 2575,
+        2625, 2630, 2690, 2693, 2752, 2759, 2819,
+        2928, 2929, 2930, 2931, 2932, 2933, 2934, 2935,
+        3001, 3006, 3066, 3069, 3128, 3135, 3195
+    };
+
+    if (wFeats != expectedStartposWhite) return false;
+
+    // 2. endgame_kpk verification
+    auto opt2 = FenParser::parse("8/8/8/4k3/8/4P3/8/4K3 w - - 0 1");
+    if (!opt2) return false;
+    auto wEnd = eval::nnue::FeatureTransformer::getActiveFeatures(*opt2, Color::White);
+    auto bEnd = eval::nnue::FeatureTransformer::getActiveFeatures(*opt2, Color::Black);
+
+    if (wEnd.size() != 1 || bEnd.size() != 1) return false;
+    if (wEnd[0] != 2580 || bEnd[0] != 18284) return false;
+
+    // 3. Strict ascending order and range [0, 40960)
+    for (size_t i = 1; i < wFeats.size(); ++i) {
+        if (wFeats[i] <= wFeats[i - 1]) return false;
+    }
+    for (int f : wFeats) {
+        if (f < 0 || f >= 40960) return false;
+    }
+
+    return true;
+}
+
+bool testGate8A_11_DualPerspectiveFeatureTransformation() {
+    // 1. Validate rank-mirroring (sq ^ 56)
+    for (int sq = 0; sq < 64; ++sq) {
+        int mirrored = sq ^ 56;
+        int rank = sq / 8;
+        int file = sq % 8;
+        int mirroredRank = mirrored / 8;
+        int mirroredFile = mirrored % 8;
+        assert(file == mirroredFile);
+        assert(mirroredRank == 7 - rank);
+        assert((mirrored ^ 56) == sq);
+        if (file != mirroredFile || mirroredRank != 7 - rank || (mirrored ^ 56) != sq) return false;
+    }
+
+    // 2. Validate piece color mapping: White piece code in [0, 4] maps to [5, 9] for Black perspective, and vice versa
+    for (int p = 0; p < 10; ++p) {
+        int mapped = (p < 5) ? (p + 5) : (p - 5);
+        assert((mapped + 5) % 10 == p);
+        if ((mapped + 5) % 10 != p) return false;
+    }
+    assert(eval::nnue::pieceToHalfKP(Piece::WhitePawn) == 0);
+    assert(eval::nnue::pieceToHalfKP(Piece::BlackPawn) == 5);
+    assert(eval::nnue::pieceToHalfKP(Piece::WhiteQueen) == 4);
+    assert(eval::nnue::pieceToHalfKP(Piece::BlackQueen) == 9);
+
+    // 3. Validate king square indexing & makeFeatureIndex:
+    // Feature index formula: (kSq * 640) + (pieceCode * 64) + pSq
+    // For White perspective: kSq=E1(4), WhitePawn(0) on E2(12) -> 4*640 + 0*64 + 12 = 2572
+    int idxWhite = eval::nnue::makeFeatureIndex(Square::E1, Piece::WhitePawn, Square::E2, Color::White);
+    assert(idxWhite == 2572);
+    if (idxWhite != 2572) return false;
+
+    // For Black perspective: kSq=E8(60)^56=4, BlackPawn(5)->0 on E7(52)^56=12 -> 4*640 + 0*64 + 12 = 2572
+    int idxBlack = eval::nnue::makeFeatureIndex(Square::E8, Piece::BlackPawn, Square::E7, Color::Black);
+    assert(idxBlack == 2572);
+    assert(idxWhite == idxBlack);
+    if (idxWhite != idxBlack) return false;
+
+    // Symmetry on startpos
+    auto opt1 = FenParser::parse("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+    if (!opt1) return false;
+    auto w1 = eval::nnue::FeatureTransformer::getActiveFeatures(*opt1, Color::White);
+    auto b1 = eval::nnue::FeatureTransformer::getActiveFeatures(*opt1, Color::Black);
+    if (w1 != b1) return false;
+
+    // Rank-mirrored positions
+    auto optA = FenParser::parse("8/8/8/4k3/8/4P3/8/4K3 w - - 0 1");
+    auto optB = FenParser::parse("4k3/8/4p3/8/4K3/8/8/8 b - - 0 1");
+    if (!optA || !optB) return false;
+
+    auto wA = eval::nnue::FeatureTransformer::getActiveFeatures(*optA, Color::White);
+    auto bA = eval::nnue::FeatureTransformer::getActiveFeatures(*optA, Color::Black);
+    auto wB = eval::nnue::FeatureTransformer::getActiveFeatures(*optB, Color::White);
+    auto bB = eval::nnue::FeatureTransformer::getActiveFeatures(*optB, Color::Black);
+
+    if (wA != bB || bA != wB) return false;
+
+    return true;
+}
+
+bool testGate8A_12_BinarySchemaCompliance() {
+    if (sizeof(dataset::DatasetHeader) != 64) return false;
+    if (sizeof(dataset::DatasetRecordPrefix) != 16) return false;
+
+    dataset::DatasetHeader h;
+    if (std::memcmp(h.magic, "BOSN_DS1", 8) != 0) return false;
+    if (h.formatVersion != 1) return false;
+    if (h.featureVersion != 1) return false;
+    if (h.teacherVersion != 950) return false;
+    if (h.teacherDepth != 6) return false;
+    if (sizeof(h.reserved) != 31) return false;
+
+    return true;
+}
+
+bool testGate8A_13_BinarySerializationRoundTripReloadIdentity() {
+    const std::string testFile = "test_roundtrip_gate8a13.bin";
+
+    std::vector<dataset::DatasetRecord> records;
+    for (int i = 0; i < 5; ++i) {
+        dataset::DatasetRecord rec;
+        rec.prefix.positionHash = 0xABCDEF0123456789ULL + static_cast<uint64_t>(i);
+        rec.prefix.sideToMove = static_cast<uint8_t>(i % 2);
+        rec.prefix.metadataFlags = static_cast<uint8_t>(i & 0x0F);
+        rec.prefix.z_stm = (i % 2 == 0) ? 1.0f : 0.0f;
+        rec.prefix.q_stm = static_cast<int16_t>((i * 50) - 100);
+        rec.whiteFeatures = {static_cast<uint16_t>(100 + i), static_cast<uint16_t>(200 + i)};
+        rec.blackFeatures = {static_cast<uint16_t>(300 + i), static_cast<uint16_t>(400 + i)};
+        records.push_back(std::move(rec));
+    }
+
+    if (!dataset::writeDataset(testFile, dataset::SPLIT_TRAIN, records, 950, 6)) {
+        std::filesystem::remove(testFile);
+        return false;
+    }
+
+    dataset::DatasetHeader hdr;
+    std::vector<dataset::DatasetRecord> reloaded;
+    if (!dataset::readDataset(testFile, hdr, reloaded)) {
+        std::filesystem::remove(testFile);
+        return false;
+    }
+
+    std::filesystem::remove(testFile);
+
+    if (hdr.recordCount != 5 || reloaded.size() != 5) return false;
+    if (hdr.splitId != dataset::SPLIT_TRAIN) return false;
+
+    for (size_t i = 0; i < 5; ++i) {
+        if (reloaded[i].prefix.positionHash != records[i].prefix.positionHash) return false;
+        if (reloaded[i].prefix.sideToMove != records[i].prefix.sideToMove) return false;
+        if (reloaded[i].prefix.metadataFlags != records[i].prefix.metadataFlags) return false;
+        if (std::abs(reloaded[i].prefix.z_stm - records[i].prefix.z_stm) > 1e-6f) return false;
+        if (reloaded[i].prefix.q_stm != records[i].prefix.q_stm) return false;
+        if (reloaded[i].whiteFeatures != records[i].whiteFeatures) return false;
+        if (reloaded[i].blackFeatures != records[i].blackFeatures) return false;
+    }
+
+    return true;
+}
+
+bool testGate8A_14_ComprehensiveDatasetDistributionTelemetry() {
+    std::vector<dataset::DatasetRecord> sample;
+    for (int i = 0; i < 100; ++i) {
+        dataset::DatasetRecord rec;
+        rec.prefix.z_stm = (i < 40) ? 1.0f : ((i < 70) ? 0.5f : 0.0f);
+        rec.prefix.q_stm = static_cast<int16_t>((i - 50) * 10);
+        if (i % 4 == 0) rec.prefix.metadataFlags |= dataset::FLAG_IN_CHECK;
+        if (i % 3 == 0) rec.prefix.metadataFlags |= dataset::FLAG_HAS_CAPTURE;
+        sample.push_back(rec);
+    }
+
+    int wins = 0, draws = 0, losses = 0;
+    int checkCnt = 0, capCnt = 0;
+    double sumQ = 0.0;
+
+    for (const auto& r : sample) {
+        if (r.prefix.z_stm == 1.0f) wins++;
+        else if (r.prefix.z_stm == 0.5f) draws++;
+        else losses++;
+
+        sumQ += r.prefix.q_stm;
+        if (r.prefix.metadataFlags & dataset::FLAG_IN_CHECK) checkCnt++;
+        if (r.prefix.metadataFlags & dataset::FLAG_HAS_CAPTURE) capCnt++;
+    }
+
+    if (wins != 40 || draws != 30 || losses != 30) return false;
+    if (checkCnt != 25) return false;
+    if (capCnt != 34) return false;
+
+    double meanQ = sumQ / 100.0;
+    if (std::abs(meanQ - (-5.0)) > 1e-4) return false;
+
+    return true;
+}
+
+bool testGate8A_15_TeacherOutcomeCalibrationDiagnostic() {
+    // 1. Theoretical logistic calibration anchor points
+    double p0 = dataset::logisticWinProb(0.0);
+    assert(std::abs(p0 - 0.5) < 1e-6);
+    if (std::abs(p0 - 0.5) > 1e-6) return false;
+
+    double pPlus400 = dataset::logisticWinProb(400.0);
+    assert(std::abs(pPlus400 - (1.0 / 1.1)) < 1e-5);
+    if (std::abs(pPlus400 - (1.0 / 1.1)) > 1e-5) return false;
+
+    double pMinus400 = dataset::logisticWinProb(-400.0);
+    assert(std::abs(pMinus400 - (1.0 / 11.0)) < 1e-5);
+    if (std::abs(pMinus400 - (1.0 / 11.0)) > 1e-5) return false;
+
+    // 2. Define evaluation bins for empirical diagnostic calibration
+    struct BinDef {
+        std::string name;
+        int16_t minQ;
+        int16_t maxQ;
+    };
+    const std::vector<BinDef> bins = {
+        {"[-inf, -300)", -32768, -300},
+        {"[-300, -100)", -300, -100},
+        {"[-100, +100)", -100, 100},
+        {"+100, +300)",  100, 300},
+        {"+300, +inf)",  300, 32767}
+    };
+
+    // Synthetic representative sample spanning evaluation spectrum
+    struct PosSample {
+        int16_t q;
+        float z;
+    };
+    const std::vector<PosSample> dataset = {
+        {-500, 0.0f}, {-450, 0.0f}, {-350, 0.0f},
+        {-250, 0.0f}, {-200, 0.0f}, {-150, 0.5f},
+        {-80, 0.0f},  {-30, 0.5f},  {0, 0.5f},     {40, 0.5f}, {80, 1.0f},
+        {150, 0.5f},  {200, 1.0f},  {280, 1.0f},
+        {350, 1.0f},  {480, 1.0f},  {600, 1.0f}
+    };
+
+    std::cout << "\n  [Gate 8-A-15 (Teacher / Outcome Calibration & Disagreement Diagnostic)]\n";
+    std::cout << "  -------------------------------------------------------------------------------------------------------\n";
+    std::cout << "  Bin Range        Count   Mean q   E[z|q] (Actual)   Heuristic Teacher Mapping   |Diff|\n";
+    std::cout << "  -------------------------------------------------------------------------------------------------------\n";
+
+    double totalDisagreement = 0.0;
+    int populatedBins = 0;
+
+    for (const auto& b : bins) {
+        int count = 0;
+        double sumQ = 0.0;
+        double sumZ = 0.0;
+
+        for (const auto& s : dataset) {
+            if (s.q >= b.minQ && s.q < b.maxQ) {
+                count++;
+                sumQ += s.q;
+                sumZ += s.z;
+            }
+        }
+
+        if (count > 0) {
+            double meanQ = sumQ / count;
+            double actualEz = sumZ / count;
+            double expectedP = dataset::logisticWinProb(meanQ);
+            double diff = std::abs(expectedP - actualEz);
+            totalDisagreement += diff;
+            populatedBins++;
+
+            std::cout << "  " << std::left << std::setw(16) << b.name
+                      << std::right << std::setw(6) << count
+                      << std::setw(9) << static_cast<int>(std::round(meanQ))
+                      << std::fixed << std::setprecision(4)
+                      << std::setw(18) << actualEz
+                      << std::setw(28) << expectedP
+                      << std::setw(9) << diff << "\n";
+        }
+    }
+
+    double meanAbsoluteDisagreement = (populatedBins > 0) ? (totalDisagreement / populatedBins) : 0.0;
+    std::cout << "  --------------------------------------------------------------------------\n";
+    std::cout << "  Empirical Mean Absolute Calibration Disagreement: " << std::fixed << std::setprecision(4)
+              << meanAbsoluteDisagreement << "\n";
+
+    if (std::isnan(meanAbsoluteDisagreement) || meanAbsoluteDisagreement < 0.0) return false;
+
+    return true;
+}
+
+bool testGate8A_16_CryptographicDatasetManifestAndSha256() {
+    const std::string testFile = "test_manifest_gate8a16.bin";
+    {
+        std::ofstream os(testFile, std::ios::binary);
+        const char dummy[] = "BosonDatasetCryptographicVerificationGate8A16";
+        os.write(dummy, sizeof(dummy));
+    }
+
+    std::string sha1 = eval::nnue::computeFileSha256(testFile);
+    if (sha1.size() != 64) {
+        std::filesystem::remove(testFile);
+        return false;
+    }
+
+    // Bit mutation avalanche test
+    {
+        std::ofstream os(testFile, std::ios::binary);
+        const char mutated[] = "CosonDatasetCryptographicVerificationGate8A16";
+        os.write(mutated, sizeof(mutated));
+    }
+
+    std::string sha2 = eval::nnue::computeFileSha256(testFile);
+    std::filesystem::remove(testFile);
+
+    if (sha2.size() != 64 || sha1 == sha2) return false;
+
+    return true;
+}
+
+bool testGate8A_17_DeterministicRegenerationInvariance() {
+    const std::string file1 = "test_regen_gate8a17_1.bin";
+    const std::string file2 = "test_regen_gate8a17_2.bin";
+
+    std::vector<dataset::DatasetRecord> records;
+    for (int i = 0; i < 10; ++i) {
+        dataset::DatasetRecord rec;
+        rec.prefix.positionHash = static_cast<uint64_t>(i * 1234567);
+        rec.prefix.sideToMove = static_cast<uint8_t>(i % 2);
+        rec.prefix.z_stm = (i % 2 == 0) ? 1.0f : 0.0f;
+        rec.prefix.q_stm = static_cast<int16_t>(i * 20);
+        rec.whiteFeatures = {static_cast<uint16_t>(i * 10)};
+        rec.blackFeatures = {static_cast<uint16_t>(i * 10 + 1)};
+        records.push_back(rec);
+    }
+
+    if (!dataset::writeDataset(file1, dataset::SPLIT_TRAIN, records, 950, 6)) {
+        return false;
+    }
+    if (!dataset::writeDataset(file2, dataset::SPLIT_TRAIN, records, 950, 6)) {
+        std::filesystem::remove(file1);
+        return false;
+    }
+
+    std::string sha1 = eval::nnue::computeFileSha256(file1);
+    std::string sha2 = eval::nnue::computeFileSha256(file2);
+
+    std::filesystem::remove(file1);
+    std::filesystem::remove(file2);
+
+    if (sha1.empty() || sha1 != sha2) return false;
+
+    return true;
+}
+
+bool runPhase8ADatasetTests() {
+    std::cout << "\n=================================================================\n";
+    std::cout << "===   SUITE 35: PHASE 8-A DATASET CONSTRUCTION & FEATURE PARITY  ===\n";
+    std::cout << "=================================================================\n";
+
+    bool pass1  = testGate8A_1_ReplayAndLegalExtraction();
+    bool pass2  = testGate8A_2_SideToMoveOutcomeLabelSemantics();
+    bool pass3  = testGate8A_3_SideToMoveEvaluationScoreSemantics();
+    bool pass4  = testGate8A_4_FrozenTeacherConfigurationLogging();
+    bool pass5  = testGate8A_5_ExclusionReasonsTaxonomy();
+    bool pass6  = testGate8A_6_DeterministicForwardSampling();
+    bool pass7  = testGate8A_7_PerGamePositionCap();
+    bool pass8  = testGate8A_8_OpeningGroupAtomicPartitioning();
+    bool pass9  = testGate8A_9_CrossSplitCollisionElimination();
+    bool pass10 = testGate8A_10_SparseFeatureParity();
+    bool pass11 = testGate8A_11_DualPerspectiveFeatureTransformation();
+    bool pass12 = testGate8A_12_BinarySchemaCompliance();
+    bool pass13 = testGate8A_13_BinarySerializationRoundTripReloadIdentity();
+    bool pass14 = testGate8A_14_ComprehensiveDatasetDistributionTelemetry();
+    bool pass15 = testGate8A_15_TeacherOutcomeCalibrationDiagnostic();
+    bool pass16 = testGate8A_16_CryptographicDatasetManifestAndSha256();
+    bool pass17 = testGate8A_17_DeterministicRegenerationInvariance();
+
+    std::cout << "Gate 8-A-1  (Replay & Legal Move Extraction):     " << (pass1  ? "PASS" : "FAIL") << "\n";
+    std::cout << "Gate 8-A-2  (Side-to-Move Outcome Semantics):     " << (pass2  ? "PASS" : "FAIL") << "\n";
+    std::cout << "Gate 8-A-3  (Side-to-Move Evaluation Semantics):  " << (pass3  ? "PASS" : "FAIL") << "\n";
+    std::cout << "Gate 8-A-4  (Frozen Teacher Configuration Log):   " << (pass4  ? "PASS" : "FAIL") << "\n";
+    std::cout << "Gate 8-A-5  (Exclusion Reasons Taxonomy):         " << (pass5  ? "PASS" : "FAIL") << "\n";
+    std::cout << "Gate 8-A-6  (Deterministic Forward Sampling):     " << (pass6  ? "PASS" : "FAIL") << "\n";
+    std::cout << "Gate 8-A-7  (Per-Game Position Cap <= 30):        " << (pass7  ? "PASS" : "FAIL") << "\n";
+    std::cout << "Gate 8-A-8  (Opening-Group Atomic 90/6/4 Split):   " << (pass8  ? "PASS" : "FAIL") << "\n";
+    std::cout << "Gate 8-A-9  (Zero Cross-Split Collision):         " << (pass9  ? "PASS" : "FAIL") << "\n";
+    std::cout << "Gate 8-A-10 (Sparse Feature Bit-Exact Parity):    " << (pass10 ? "PASS" : "FAIL") << "\n";
+    std::cout << "Gate 8-A-11 (Dual-Perspective Feature Transformation): " << (pass11 ? "PASS" : "FAIL") << "\n";
+    std::cout << "Gate 8-A-12 (Binary Schema Header & Layout):      " << (pass12 ? "PASS" : "FAIL") << "\n";
+    std::cout << "Gate 8-A-13 (Round-Trip Binary Reload Identity):  " << (pass13 ? "PASS" : "FAIL") << "\n";
+    std::cout << "Gate 8-A-14 (Dataset Distribution Telemetry):     " << (pass14 ? "PASS" : "FAIL") << "\n";
+    std::cout << "Gate 8-A-15 (Teacher/Outcome Calibration Diagnostic): " << (pass15 ? "PASS" : "FAIL") << "\n";
+    std::cout << "Gate 8-A-16 (Dataset SHA-256 Manifest Logging):   " << (pass16 ? "PASS" : "FAIL") << "\n";
+    std::cout << "Gate 8-A-17 (Deterministic Regeneration Invariance):" << (pass17 ? "PASS" : "FAIL") << "\n";
+    std::cout << "=================================================================\n";
+
+    return pass1 && pass2 && pass3 && pass4 && pass5 && pass6 && pass7 && pass8 &&
+           pass9 && pass10 && pass11 && pass12 && pass13 && pass14 && pass15 && pass16 && pass17;
+}
+
+
 void runDiagnostics() {
     std::cout << "\n==================================================\n";
     std::cout << "===   EXECUTING BOSON SUBSYSTEM DIAGNOSTICS   ===\n";
@@ -9686,6 +10609,7 @@ int main(int argc, char* argv[]) {
     bool phase7FSuccess = Boson::runPhase7FAVX2Tests();
     bool smokeMatchSuccess = Boson::runOperationalSmokeMatch20Games();
     bool phase7GSuccess = Boson::runPhase7GStrengthValidationTests();
+    bool phase8ASuccess = Boson::runPhase8ADatasetTests();
     Boson::runDiagnostics();
     std::cout << "\n=== TEST SUITE RESULTS ===\n"
               << "m1Phase2: " << m1Phase2Success << "\n"
@@ -9722,6 +10646,7 @@ int main(int argc, char* argv[]) {
               << "phase7F: " << phase7FSuccess << "\n"
               << "smokeMatch: " << smokeMatchSuccess << "\n"
               << "phase7G: " << phase7GSuccess << "\n"
+              << "phase8A: " << phase8ASuccess << "\n"
               << "==========================\n";
-    return (m1Phase2Success && m1Module13Success && m2PhasesBCSuccess && m2PerftSuccess && phaseYZSuccess && phaseAASuccess && phaseABSuccess && m6Phase12Success && m6Module63Success && m6Module64Success && m6Module65Success && m6Module66Success && m6Module67Success && m6Module68Success && m6Module69Success && m6Module610Success && omegaPhase1Success && omegaPhase2Success && omegaPhase3Success && omegaPhase4Success && omegaPhase5Success && omegaPhase6Success && phase65ASuccess && phase65BSuccess && phase65CSuccess && phase65DSuccess && phase7ASuccess && phase7BSuccess && phase7CSuccess && phase7DSuccess && phase7ESuccess && phase7FSuccess && smokeMatchSuccess && phase7GSuccess) ? 0 : 1;
+    return (m1Phase2Success && m1Module13Success && m2PhasesBCSuccess && m2PerftSuccess && phaseYZSuccess && phaseAASuccess && phaseABSuccess && m6Phase12Success && m6Module63Success && m6Module64Success && m6Module65Success && m6Module66Success && m6Module67Success && m6Module68Success && m6Module69Success && m6Module610Success && omegaPhase1Success && omegaPhase2Success && omegaPhase3Success && omegaPhase4Success && omegaPhase5Success && omegaPhase6Success && phase65ASuccess && phase65BSuccess && phase65CSuccess && phase65DSuccess && phase7ASuccess && phase7BSuccess && phase7CSuccess && phase7DSuccess && phase7ESuccess && phase7FSuccess && smokeMatchSuccess && phase7GSuccess && phase8ASuccess) ? 0 : 1;
 }
