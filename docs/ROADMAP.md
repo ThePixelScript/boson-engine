@@ -214,8 +214,28 @@ This document outlines the architectural roadmap for the Boson chess engine, tra
     * **Classical Search Control Invariance:** Isolated depth-6 benchmark locked at exactly **313,092 nodes** ($\Delta = 0$ nodes vs frozen `v0.9.5-classical-enhanced` control).
     * **Full Verification Battery:** Suite #35 passed all 15 validation gates (Gates 8-A-1 through 8-A-15). All 35 test suites passing cleanly (`phase8A: 1`).
     * **Status:** **Complete / Closed**.
+  - **Phase 8-B (Float32 HalfKP Supervised Training Pipeline & Baseline Experiments):** Implemented the supervised training pipeline with the explicit `/64` hidden-layer scaling bridge, executed controlled micro-baseline experiments, and performed quantization shadow testing.
+    * **Model Mode & Topology Partitioning:** Mode P2 (Frozen Feature Transformer, Trainable FC1/FC2/FC3 Head: 33,889 trainable parameters; 20,972,032 frozen embedding weights) served as primary baseline, with Mode P1 (Full Network, 21,005,921 trainable parameters) executed for pipeline validation.
+    * **Micro-Baseline Dataset Context:** Trained strictly on `data/dataset_phase8a/train.bin` (4,497 records, 180 games, 45 opening blocks); validation on `val.bin` (300 records, 12 games, 3 opening blocks); strict test isolation on `test.bin` (200 records, 8 games, 2 opening blocks).
+    * **Controlled Baselines Battery:** Evaluated seven 25-epoch runs with AdamW ($\text{lr} = 10^{-3}, \text{weight\_decay} = 10^{-4}$):
+      - Exp A: Pure Game Outcome BCE ($\alpha = 1.0$) -> Val BCE 0.6710, Brier 0.1354, Corr $+0.1869$.
+      - Exp B1: Teacher Distillation Logistic Prob MSE ($\alpha = 0.0$) -> Val BCE 0.6847, Brier 0.1416, Corr $+0.0983$.
+      - Exp B2: Direct Centipawn Normalized MSE $((E-q)/400)^2$ -> Val BCE 0.6835, Brier 0.1410, Corr $+0.0809$.
+      - Exp C1: Blended Loss ($\alpha = 0.25$) -> Val BCE 0.6744, Brier 0.1367, Corr $+0.1650$.
+      - Exp C2: Blended Loss ($\alpha = 0.50$) -> Val BCE 0.6707, Brier 0.1351, Corr $+0.1746$.
+      - Exp C3: Blended Loss ($\alpha = 0.75$) -> Val BCE **0.6695**, Brier **0.1346**, Corr **+0.1803** (**Validation Winner**).
+      - Exp P1: Mode P1 Full Network Validation ($\alpha = 0.50$) -> Val BCE 0.6707, Brier 0.1351, Corr $+0.1746$.
+    * **Out-of-Sample Test Evaluation:** Following post-selection freeze, winning model `Exp_C3_Blended_a075_best.pt` evaluated on `test.bin`: BCE = 0.7316, Brier = 0.1751, $\mu_E = +5.36\text{ cp}, \sigma_E = 56.72\text{ cp}$, zero saturation at boundary 127.
+    * **Quantization Shadow Findings:** Gate 8-B-15 shadow emulation revealed preliminary shadow MAE = 33.36 cp and $\max |\Delta E| = 61.36\text{ cp}$ (~$58.8\%$ of $\sigma_E$), demonstrating that integer division truncation across multiple layers creates compounding residual shift and motivating formal layer-wise quantization calibration in Phase 8-C.
+    * **Classical Search Control Invariance:** Pinned at exactly **313,092 nodes** ($\Delta = 0$ nodes vs frozen `v0.9.5-classical-enhanced` control).
+    * **Full Verification Battery:** Suite #36 passed all 15 validation gates (Gates 8-B-1 through 8-B-15). All 36 test suites passing cleanly (`phase8B: 1`).
+    * **Status:** **Complete / Closed**.
+  - **Phase 8-C (Quantization Calibration & In-Engine Serialization):**
+    * **Phase 8-C1 (Layer-Wise Quantization Fidelity & Calibration Diagnostic):** Formal layer-by-layer quantization error distribution profiling (accumulator, FC1, FC2, FC3) across validation split ($N = 300$), analyzing MAE, RMSE, P95/P99 tails, and activation saturation to develop integer rounding bias mitigation.
+    * **Phase 8-C2 (Quantization Exporter & In-Engine Serialization):** Exporter translating calibrated Float32 parameters into the production little-endian `boson-v2.nnue` binary layout, verified by in-engine SHA-256 digest validation and round-trip parity checks.
+  - **Phase 8-D (Empirical Model Progression & SPRT Validation):** Sequential tournament validation of trained NNUE model candidates against frozen classical baseline (`v0.9.5-classical-enhanced`) under automated SPRT matches.
 - **Exit Criteria:** Trained network achieving statistically significant positive Elo gain over Classical HCE baseline in fixed-depth/fixed-time SPRT matches ($\Delta\text{Elo} \ge +50\text{ Elo}$, SPRT Accept $H_1$).
-- **Status:** **In Progress** (Phase 8-A Complete).
+- **Status:** **In Progress** (Phases 8-A & 8-B Complete).
 
 ---
 

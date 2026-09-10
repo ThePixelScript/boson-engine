@@ -10,3 +10,5 @@ bin/
 __pycache__/
 *.pyc
 debug_log.txt
+*.pt
+checkpoints/*.pt

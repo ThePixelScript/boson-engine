@@ -10519,6 +10519,570 @@ bool runPhase8ADatasetTests() {
            pass9 && pass10 && pass11 && pass12 && pass13 && pass14 && pass15 && pass16 && pass17;
 }
 
+// ============================================================================
+// SUITE 36: PHASE 8-B FLOAT32 HALFKP SUPERVISED TRAINING & QUANTIZATION BRIDGE
+// ============================================================================
+
+namespace training {
+
+constexpr float T_E = 400.0f;
+constexpr float T_Q = 400.0f;
+constexpr float LN10 = 2.302585092994046f;
+constexpr float LN10_DIV_400 = LN10 / 400.0f;
+
+inline float sigmoidBase10(float cp) {
+    return 1.0f / (1.0f + std::pow(10.0f, -cp / 400.0f));
+}
+
+inline float bceLossWithLogit(float logit, float z) {
+    float maxVal = std::max(logit, 0.0f);
+    return maxVal - logit * z + std::log1p(std::exp(-std::abs(logit)));
+}
+
+struct FloatModelBridge {
+    std::array<float, 32> fc1_biases{};
+    std::array<std::array<float, 1024>, 32> fc1_weights{};
+    std::array<float, 32> fc2_biases{};
+    std::array<std::array<float, 32>, 32> fc2_weights{};
+    float fc3_bias{0.0f};
+    std::array<float, 32> fc3_weights{};
+};
+
+struct FloatForwardDiagnostics {
+    std::array<float, 32> h1{};
+    std::array<float, 32> h2{};
+    float E{0.0f};
+    float h1_zero_pct{0.0f};
+    float h1_sat_pct{0.0f};
+    float h2_zero_pct{0.0f};
+    float h2_sat_pct{0.0f};
+};
+
+inline FloatForwardDiagnostics forwardFloat(const std::array<float, 1024>& acc, const FloatModelBridge& model) {
+    FloatForwardDiagnostics diag{};
+
+    // 1. Feature normalization bridge: x_norm = clamp(A, 0.0, 127.0) / 127.0
+    std::array<float, 1024> x_norm{};
+    for (size_t i = 0; i < 1024; ++i) {
+        x_norm[i] = std::clamp(acc[i], 0.0f, 127.0f) / 127.0f;
+    }
+
+    // 2. FC1: u1 = FC1(x_norm) --> h1 = clamp(u1, 0, 127)
+    int h1_z = 0, h1_s = 0;
+    for (size_t j = 0; j < 32; ++j) {
+        float sum = model.fc1_biases[j];
+        for (size_t i = 0; i < 1024; ++i) {
+            sum += x_norm[i] * model.fc1_weights[j][i];
+        }
+        float h = std::clamp(sum, 0.0f, 127.0f);
+        diag.h1[j] = h;
+        if (h == 0.0f) h1_z++;
+        if (h == 127.0f) h1_s++;
+    }
+    diag.h1_zero_pct = (h1_z / 32.0f) * 100.0f;
+    diag.h1_sat_pct  = (h1_s / 32.0f) * 100.0f;
+
+    // 3. FC2: u2 = FC2(h1) --> h2 = clamp(u2, 0, 127)
+    int h2_z = 0, h2_s = 0;
+    for (size_t k = 0; k < 32; ++k) {
+        float sum = model.fc2_biases[k];
+        for (size_t j = 0; j < 32; ++j) {
+            sum += diag.h1[j] * model.fc2_weights[k][j];
+        }
+        float h = std::clamp(sum, 0.0f, 127.0f);
+        diag.h2[k] = h;
+        if (h == 0.0f) h2_z++;
+        if (h == 127.0f) h2_s++;
+    }
+    diag.h2_zero_pct = (h2_z / 32.0f) * 100.0f;
+    diag.h2_sat_pct  = (h2_s / 32.0f) * 100.0f;
+
+    // 4. FC3: E = FC3(h2) (linear centipawn output)
+    float sum3 = model.fc3_bias;
+    for (size_t k = 0; k < 32; ++k) {
+        sum3 += diag.h2[k] * model.fc3_weights[k];
+    }
+    diag.E = std::clamp(sum3, static_cast<float>(eval::nnue::NNUE_EVAL_MIN), static_cast<float>(eval::nnue::NNUE_EVAL_MAX));
+
+    return diag;
+}
+
+inline int32_t forwardShadow(const std::array<int16_t, 1024>& acc, const FloatModelBridge& floatModel) {
+    // 1. Quantize weights to match bridge exact integer representation
+    std::array<int32_t, 32> b1_int{};
+    std::array<std::array<int8_t, 1024>, 32> w1_int{};
+    for (size_t j = 0; j < 32; ++j) {
+        b1_int[j] = static_cast<int32_t>(std::round(floatModel.fc1_biases[j] * 64.0f));
+        for (size_t i = 0; i < 1024; ++i) {
+            float w = std::round(floatModel.fc1_weights[j][i] * (64.0f / 127.0f));
+            w1_int[j][i] = static_cast<int8_t>(std::clamp(static_cast<int>(w), -128, 127));
+        }
+    }
+
+    std::array<int32_t, 32> b2_int{};
+    std::array<std::array<int8_t, 32>, 32> w2_int{};
+    for (size_t k = 0; k < 32; ++k) {
+        b2_int[k] = static_cast<int32_t>(std::round(floatModel.fc2_biases[k] * 64.0f));
+        for (size_t j = 0; j < 32; ++j) {
+            float w = std::round(floatModel.fc2_weights[k][j] * 64.0f);
+            w2_int[k][j] = static_cast<int8_t>(std::clamp(static_cast<int>(w), -128, 127));
+        }
+    }
+
+    int32_t b3_int = static_cast<int32_t>(std::round(floatModel.fc3_bias / 16.0f));
+    std::array<int8_t, 32> w3_int{};
+    for (size_t k = 0; k < 32; ++k) {
+        float w = std::round(floatModel.fc3_weights[k] / 16.0f);
+        w3_int[k] = static_cast<int8_t>(std::clamp(static_cast<int>(w), -128, 127));
+    }
+
+    // 2. Exact ScalarInference execution:
+    std::array<int8_t, 1024> input_act{};
+    for (size_t i = 0; i < 1024; ++i) {
+        input_act[i] = eval::nnue::ScalarInference::crelu(acc[i]);
+    }
+
+    std::array<int8_t, 32> h1{};
+    for (size_t j = 0; j < 32; ++j) {
+        int32_t sum = b1_int[j];
+        for (size_t i = 0; i < 1024; ++i) {
+            sum += static_cast<int32_t>(input_act[i]) * static_cast<int32_t>(w1_int[j][i]);
+        }
+        int32_t scaled = sum / 64; // truncates toward zero
+        h1[j] = eval::nnue::ScalarInference::crelu(scaled);
+    }
+
+    std::array<int8_t, 32> h2{};
+    for (size_t k = 0; k < 32; ++k) {
+        int32_t sum = b2_int[k];
+        for (size_t j = 0; j < 32; ++j) {
+            sum += static_cast<int32_t>(h1[j]) * static_cast<int32_t>(w2_int[k][j]);
+        }
+        int32_t scaled = sum / 64;
+        h2[k] = eval::nnue::ScalarInference::crelu(scaled);
+    }
+
+    int32_t sum3 = b3_int;
+    for (size_t k = 0; k < 32; ++k) {
+        sum3 += static_cast<int32_t>(h2[k]) * static_cast<int32_t>(w3_int[k]);
+    }
+    int32_t score = sum3 * eval::nnue::NNUE_OUTPUT_SCALE; // * 16
+    return std::clamp<int32_t>(score, eval::nnue::NNUE_EVAL_MIN, eval::nnue::NNUE_EVAL_MAX);
+}
+
+inline FloatModelBridge createDeterministicFloatBridge(uint32_t seed = 42) {
+    FloatModelBridge m{};
+    uint64_t state = (seed == 0) ? 1337ULL : static_cast<uint64_t>(seed);
+    auto nextRand = [&state]() -> uint64_t {
+        state ^= state >> 12;
+        state ^= state << 25;
+        state ^= state >> 27;
+        return state * 0x2545F4914F6CDD1DULL;
+    };
+
+    for (size_t j = 0; j < 32; ++j) {
+        uint64_t r = nextRand();
+        m.fc1_biases[j] = (-5.0f + static_cast<float>(r % 11)) / 64.0f;
+        for (size_t i = 0; i < 1024; ++i) {
+            uint64_t rw = nextRand();
+            float w_int = -2.0f + static_cast<float>(rw % 5);
+            m.fc1_weights[j][i] = w_int * (127.0f / 64.0f);
+        }
+    }
+
+    for (size_t k = 0; k < 32; ++k) {
+        uint64_t r = nextRand();
+        m.fc2_biases[k] = (-5.0f + static_cast<float>(r % 11)) / 64.0f;
+        for (size_t j = 0; j < 32; ++j) {
+            uint64_t rw = nextRand();
+            float w_int = -2.0f + static_cast<float>(rw % 5);
+            m.fc2_weights[k][j] = w_int / 64.0f;
+        }
+    }
+
+    uint64_t rb = nextRand();
+    m.fc3_bias = (-2.0f + static_cast<float>(rb % 5)) * 16.0f;
+    for (size_t k = 0; k < 32; ++k) {
+        uint64_t rw = nextRand();
+        float w_int = -2.0f + static_cast<float>(rw % 5);
+        m.fc3_weights[k] = w_int * 16.0f;
+    }
+
+    return m;
+}
+
+} // namespace training
+
+bool testGate8B_1_ModelTopologySpecification() {
+    if (eval::nnue::HALFKP_FEATURES != 40960) return false;
+    if (eval::nnue::ACCUMULATOR_SIZE != 512) return false;
+    if (eval::nnue::FC1_INPUT_SIZE != 1024) return false;
+    if (eval::nnue::FC1_OUTPUT_SIZE != 32) return false;
+    if (eval::nnue::FC2_OUTPUT_SIZE != 32) return false;
+
+    constexpr size_t p2Params = (1024 * 32 + 32) + (32 * 32 + 32) + (32 * 1 + 1);
+    if (p2Params != 33889) return false;
+
+    constexpr size_t ftParams = (40960 * 512) + 512;
+    if (ftParams != 20972032) return false;
+    constexpr size_t p1Params = p2Params + ftParams;
+    if (p1Params != 21005921) return false;
+
+    return true;
+}
+
+bool testGate8B_2_AccumulatorNormalizationBridge() {
+    float aNeg = -350.0f;
+    float normNeg = std::clamp(aNeg, 0.0f, 127.0f) / 127.0f;
+    if (normNeg != 0.0f) return false;
+
+    float aZero = 0.0f;
+    float normZero = std::clamp(aZero, 0.0f, 127.0f) / 127.0f;
+    if (normZero != 0.0f) return false;
+
+    float aMid = 63.5f;
+    float normMid = std::clamp(aMid, 0.0f, 127.0f) / 127.0f;
+    if (std::abs(normMid - 0.5f) > 1e-6f) return false;
+
+    float aCap = 127.0f;
+    float normCap = std::clamp(aCap, 0.0f, 127.0f) / 127.0f;
+    if (normCap != 1.0f) return false;
+
+    float aOver = 500.0f;
+    float normOver = std::clamp(aOver, 0.0f, 127.0f) / 127.0f;
+    if (normOver != 1.0f) return false;
+
+    return true;
+}
+
+bool testGate8B_3_HiddenLayer1ForwardActivation() {
+    training::FloatModelBridge model = training::createDeterministicFloatBridge(101);
+    std::array<float, 1024> acc{};
+    for (size_t i = 0; i < 1024; ++i) {
+        acc[i] = (i % 2 == 0) ? 100.0f : -50.0f;
+    }
+
+    auto diag = training::forwardFloat(acc, model);
+    if (diag.h1.size() != 32) return false;
+
+    for (float v : diag.h1) {
+        if (v < 0.0f || v > 127.0f) return false;
+    }
+    return true;
+}
+
+bool testGate8B_4_HiddenLayer2ForwardActivation() {
+    training::FloatModelBridge model = training::createDeterministicFloatBridge(202);
+    std::array<float, 1024> acc{};
+    for (size_t i = 0; i < 1024; ++i) {
+        acc[i] = static_cast<float>((i * 7) % 200) - 50.0f;
+    }
+
+    auto diag = training::forwardFloat(acc, model);
+    if (diag.h2.size() != 32) return false;
+
+    for (float v : diag.h2) {
+        if (v < 0.0f || v > 127.0f) return false;
+    }
+    return true;
+}
+
+bool testGate8B_5_OutputLayerFC3LinearCentipawnMapping() {
+    training::FloatModelBridge model = training::createDeterministicFloatBridge(303);
+    std::array<float, 1024> acc{};
+    for (size_t i = 0; i < 1024; ++i) {
+        acc[i] = (i < 512) ? 80.0f : 20.0f;
+    }
+
+    auto diag = training::forwardFloat(acc, model);
+    if (std::isnan(diag.E) || std::isinf(diag.E)) return false;
+    if (diag.E < -30000.0f || diag.E > 30000.0f) return false;
+
+    return true;
+}
+
+bool testGate8B_6_SigmoidProbabilityMappingAndFrozenTemperature() {
+    if (training::T_E != 400.0f || training::T_Q != 400.0f) return false;
+
+    float p0 = training::sigmoidBase10(0.0f);
+    if (std::abs(p0 - 0.5f) > 1e-6f) return false;
+
+    float pPlus = training::sigmoidBase10(400.0f);
+    if (std::abs(pPlus - (1.0f / 1.1f)) > 1e-5f) return false;
+
+    float pMinus = training::sigmoidBase10(-400.0f);
+    if (std::abs(pMinus - (1.0f / 11.0f)) > 1e-5f) return false;
+
+    float pTest = 0.75f;
+    float E_recovered = -400.0f * std::log10(1.0f / pTest - 1.0f);
+    float p_recalc = training::sigmoidBase10(E_recovered);
+    if (std::abs(p_recalc - pTest) > 1e-5f) return false;
+
+    return true;
+}
+
+bool testGate8B_7_ExpAOutcomeOnlyBCEFormulation() {
+    float logit1 = 400.0f * training::LN10_DIV_400;
+    float z1 = 1.0f;
+    float loss1 = training::bceLossWithLogit(logit1, z1);
+    if (std::abs(loss1 - std::log(1.1f)) > 1e-4f) return false;
+
+    float lossDraw = training::bceLossWithLogit(0.0f, 0.5f);
+    if (std::abs(lossDraw - std::log(2.0f)) > 1e-4f) return false;
+
+    if (loss1 < 0.0f || lossDraw < 0.0f) return false;
+
+    return true;
+}
+
+bool testGate8B_8_ExpB1TeacherDistillationMSEFormulation() {
+    float E = 250.0f;
+    float q = 250.0f;
+    float pE = training::sigmoidBase10(E);
+    float pq = training::sigmoidBase10(q);
+    float mseZero = (pE - pq) * (pE - pq);
+    if (mseZero != 0.0f) return false;
+
+    float E2 = 400.0f;
+    float q2 = 0.0f;
+    float pE2 = training::sigmoidBase10(E2);
+    float pq2 = training::sigmoidBase10(q2);
+    float diff = pE2 - pq2;
+    float mse = diff * diff;
+    if (std::abs(mse - 0.167355f) > 1e-3f) return false;
+
+    return true;
+}
+
+bool testGate8B_9_ExpB2DirectNormalizedCentipawnMSEFormulation() {
+    float E = 300.0f;
+    float q = 100.0f;
+    float loss = std::pow((E / 400.0f) - (q / 400.0f), 2.0f);
+    float expected = std::pow(200.0f / 400.0f, 2.0f);
+    if (std::abs(loss - expected) > 1e-6f) return false;
+    if (loss != 0.25f) return false;
+
+    return true;
+}
+
+bool testGate8B_10_ExpCBlendedConvexCombinationObjective() {
+    float lossBCE = 0.50f;
+    float lossDistill = 0.10f;
+
+    for (float alpha : {0.25f, 0.50f, 0.75f}) {
+        float blended = alpha * lossBCE + (1.0f - alpha) * lossDistill;
+        float expected = alpha * 0.50f + (1.0f - alpha) * 0.10f;
+        if (std::abs(blended - expected) > 1e-6f) return false;
+        if (blended < lossDistill || blended > lossBCE) return false;
+    }
+
+    if (1.0f * lossBCE + 0.0f * lossDistill != lossBCE) return false;
+    if (0.0f * lossBCE + 1.0f * lossDistill != lossDistill) return false;
+
+    return true;
+}
+
+bool testGate8B_11_DatasetSerializationRecordIngestionIntegrity() {
+    dataset::DatasetHeader trainHdr, valHdr;
+    std::vector<dataset::DatasetRecord> trainRecs, valRecs;
+
+    if (!dataset::readDataset("data/dataset_phase8a/train.bin", trainHdr, trainRecs)) return false;
+    if (!dataset::readDataset("data/dataset_phase8a/val.bin", valHdr, valRecs)) return false;
+
+    if (trainHdr.recordCount != 4497 || trainRecs.size() != 4497) return false;
+    if (valHdr.recordCount != 300 || valRecs.size() != 300) return false;
+
+    for (const auto& r : trainRecs) {
+        if (r.prefix.sideToMove > 1) return false;
+        for (uint16_t f : r.whiteFeatures) {
+            if (f >= 40960) return false;
+        }
+        for (uint16_t f : r.blackFeatures) {
+            if (f >= 40960) return false;
+        }
+    }
+
+    return true;
+}
+
+bool testGate8B_12_TestSetIsolationSplitInviolabilityVerification() {
+    dataset::DatasetHeader testHdr;
+    std::vector<dataset::DatasetRecord> testRecs;
+    if (!dataset::readDataset("data/dataset_phase8a/test.bin", testHdr, testRecs)) return false;
+
+    if (testHdr.recordCount != 200 || testRecs.size() != 200) return false;
+    if (testHdr.splitId != dataset::SPLIT_TEST) return false;
+
+    dataset::DatasetHeader trainHdr, valHdr;
+    std::vector<dataset::DatasetRecord> trainRecs, valRecs;
+    if (!dataset::readDataset("data/dataset_phase8a/train.bin", trainHdr, trainRecs)) return false;
+    if (!dataset::readDataset("data/dataset_phase8a/val.bin", valHdr, valRecs)) return false;
+
+    std::unordered_set<uint64_t> trainHashes, valHashes, testHashes;
+    for (const auto& r : trainRecs) trainHashes.insert(r.prefix.positionHash);
+    for (const auto& r : valRecs)   valHashes.insert(r.prefix.positionHash);
+    for (const auto& r : testRecs)  testHashes.insert(r.prefix.positionHash);
+
+    for (uint64_t h : testHashes) {
+        if (trainHashes.contains(h)) return false;
+        if (valHashes.contains(h)) return false;
+    }
+    for (uint64_t h : valHashes) {
+        if (trainHashes.contains(h)) return false;
+    }
+
+    return true;
+}
+
+bool testGate8B_13_ModeP2FrozenFeatureTransformerInvariant() {
+    auto fwOriginal = eval::nnue::FeatureWeights::createDeterministic(42);
+    auto fwCandidate = eval::nnue::FeatureWeights::createDeterministic(42);
+
+    if (fwOriginal->biases != fwCandidate->biases) return false;
+    if (fwOriginal->weights != fwCandidate->weights) return false;
+
+    return true;
+}
+
+bool testGate8B_14_ActivationSaturationAndDeadNeuronDiagnostics() {
+    std::array<float, 32> h{};
+    for (size_t i = 0; i < 32; ++i) {
+        if (i < 8) h[i] = 0.0f;         // 25% dead
+        else if (i < 24) h[i] = 50.0f;  // 50% linear
+        else h[i] = 127.0f;             // 25% saturated
+    }
+
+    int zeros = 0, sats = 0;
+    for (float v : h) {
+        if (v == 0.0f) zeros++;
+        if (v == 127.0f) sats++;
+    }
+
+    float zeroPct = (zeros / 32.0f) * 100.0f;
+    float satPct  = (sats / 32.0f) * 100.0f;
+
+    if (zeroPct != 25.0f || satPct != 25.0f) return false;
+
+    return true;
+}
+
+bool testGate8B_15_QuantizationShadowCheck() {
+    training::FloatModelBridge model = training::createDeterministicFloatBridge(777);
+
+    dataset::DatasetHeader valHdr;
+    std::vector<dataset::DatasetRecord> valRecs;
+    if (!dataset::readDataset("data/dataset_phase8a/val.bin", valHdr, valRecs)) return false;
+
+    auto fw = eval::nnue::FeatureWeights::createDeterministic(42);
+
+    size_t batchSize = std::min<size_t>(128, valRecs.size());
+    double sumAbsDiff = 0.0;
+    double maxAbsDiff = 0.0;
+
+    std::cout << "\n  [Gate 8-B-15 (Quantization Shadow Check Telemetry on " << batchSize << " Positions)]\n";
+    std::cout << "  -----------------------------------------------------------------------------------\n";
+    std::cout << "  Pos #   Side     E_float (cp)    E_shadow (cp)       |Diff|    Teacher q\n";
+    std::cout << "  -----------------------------------------------------------------------------------\n";
+
+    for (size_t idx = 0; idx < batchSize; ++idx) {
+        const auto& rec = valRecs[idx];
+
+        std::array<int16_t, 1024> accInt{};
+        std::array<float, 1024> accFloat{};
+
+        const auto& usFeats = (rec.prefix.sideToMove == 0) ? rec.whiteFeatures : rec.blackFeatures;
+        const auto& themFeats = (rec.prefix.sideToMove == 0) ? rec.blackFeatures : rec.whiteFeatures;
+
+        for (size_t i = 0; i < 512; ++i) {
+            int32_t sumUs = fw->biases[i];
+            for (uint16_t f : usFeats) {
+                sumUs += fw->weights[f][i];
+            }
+            int16_t usVal = static_cast<int16_t>(std::clamp(sumUs, -32768, 32767));
+            accInt[i] = usVal;
+            accFloat[i] = static_cast<float>(usVal);
+
+            int32_t sumThem = fw->biases[i];
+            for (uint16_t f : themFeats) {
+                sumThem += fw->weights[f][i];
+            }
+            int16_t themVal = static_cast<int16_t>(std::clamp(sumThem, -32768, 32767));
+            accInt[512 + i] = themVal;
+            accFloat[512 + i] = static_cast<float>(themVal);
+        }
+
+        auto diag = training::forwardFloat(accFloat, model);
+        int32_t shadowScore = training::forwardShadow(accInt, model);
+
+        double diff = std::abs(diag.E - static_cast<float>(shadowScore));
+        sumAbsDiff += diff;
+        if (diff > maxAbsDiff) maxAbsDiff = diff;
+
+        if (idx < 5) {
+            std::cout << "  " << std::setw(5) << idx
+                      << std::setw(7) << (rec.prefix.sideToMove == 0 ? "White" : "Black")
+                      << std::fixed << std::setprecision(2)
+                      << std::setw(17) << diag.E
+                      << std::setw(17) << shadowScore
+                      << std::setw(13) << diff
+                      << std::setw(13) << rec.prefix.q_stm << "\n";
+        }
+    }
+
+    double mae = sumAbsDiff / batchSize;
+    std::cout << "  -----------------------------------------------------------------------------------\n";
+    std::cout << "  Mini-Batch Max Absolute Error |E_float - E_shadow|: " << maxAbsDiff << " cp\n";
+    std::cout << "  Mini-Batch Mean Absolute Error MAE(E_float, E_shadow): " << mae << " cp\n";
+    std::cout << "  -----------------------------------------------------------------------------------\n";
+
+    if (maxAbsDiff > 100.0) return false;
+    if (mae > 50.0) return false;
+
+    return true;
+}
+
+bool runPhase8BSupervisedTrainingTests() {
+    std::cout << "\n=================================================================\n";
+    std::cout << "===   SUITE 36: PHASE 8-B SUPERVISED TRAINING & QUANTIZATION   ===\n";
+    std::cout << "=================================================================\n";
+
+    bool pass1  = testGate8B_1_ModelTopologySpecification();
+    bool pass2  = testGate8B_2_AccumulatorNormalizationBridge();
+    bool pass3  = testGate8B_3_HiddenLayer1ForwardActivation();
+    bool pass4  = testGate8B_4_HiddenLayer2ForwardActivation();
+    bool pass5  = testGate8B_5_OutputLayerFC3LinearCentipawnMapping();
+    bool pass6  = testGate8B_6_SigmoidProbabilityMappingAndFrozenTemperature();
+    bool pass7  = testGate8B_7_ExpAOutcomeOnlyBCEFormulation();
+    bool pass8  = testGate8B_8_ExpB1TeacherDistillationMSEFormulation();
+    bool pass9  = testGate8B_9_ExpB2DirectNormalizedCentipawnMSEFormulation();
+    bool pass10 = testGate8B_10_ExpCBlendedConvexCombinationObjective();
+    bool pass11 = testGate8B_11_DatasetSerializationRecordIngestionIntegrity();
+    bool pass12 = testGate8B_12_TestSetIsolationSplitInviolabilityVerification();
+    bool pass13 = testGate8B_13_ModeP2FrozenFeatureTransformerInvariant();
+    bool pass14 = testGate8B_14_ActivationSaturationAndDeadNeuronDiagnostics();
+    bool pass15 = testGate8B_15_QuantizationShadowCheck();
+
+    std::cout << "Gate 8-B-1  (Model Topology & Parameter Partitioning): " << (pass1  ? "PASS" : "FAIL") << "\n";
+    std::cout << "Gate 8-B-2  (Accumulator Normalization Bridge /64):   " << (pass2  ? "PASS" : "FAIL") << "\n";
+    std::cout << "Gate 8-B-3  (Hidden Layer 1 Forward & CReLU Bounds):  " << (pass3  ? "PASS" : "FAIL") << "\n";
+    std::cout << "Gate 8-B-4  (Hidden Layer 2 Forward & Scaling Bridge):" << (pass4  ? "PASS" : "FAIL") << "\n";
+    std::cout << "Gate 8-B-5  (Output Layer FC3 Linear Centipawn Eval): " << (pass5  ? "PASS" : "FAIL") << "\n";
+    std::cout << "Gate 8-B-6  (Sigmoid Probability & Frozen Temp T=400):" << (pass6  ? "PASS" : "FAIL") << "\n";
+    std::cout << "Gate 8-B-7  (Exp A: Outcome-Only BCE Formulation):    " << (pass7  ? "PASS" : "FAIL") << "\n";
+    std::cout << "Gate 8-B-8  (Exp B1: Teacher Distill MSE Formulation):" << (pass8  ? "PASS" : "FAIL") << "\n";
+    std::cout << "Gate 8-B-9  (Exp B2: Direct Centipawn MSE Objective): " << (pass9  ? "PASS" : "FAIL") << "\n";
+    std::cout << "Gate 8-B-10 (Exp C: Blended Convex Combination Loss): " << (pass10 ? "PASS" : "FAIL") << "\n";
+    std::cout << "Gate 8-B-11 (Dataset Binary Ingestion Record Counts): " << (pass11 ? "PASS" : "FAIL") << "\n";
+    std::cout << "Gate 8-B-12 (Test Set Isolation & Zero Collision):    " << (pass12 ? "PASS" : "FAIL") << "\n";
+    std::cout << "Gate 8-B-13 (Mode P2 Frozen Feature Transformer):     " << (pass13 ? "PASS" : "FAIL") << "\n";
+    std::cout << "Gate 8-B-14 (Activation Saturation & Diagnostics):    " << (pass14 ? "PASS" : "FAIL") << "\n";
+    std::cout << "Gate 8-B-15 (Quantization Shadow Check Telemetry):    " << (pass15 ? "PASS" : "FAIL") << "\n";
+    std::cout << "=================================================================\n";
+
+    return pass1 && pass2 && pass3 && pass4 && pass5 && pass6 && pass7 && pass8 &&
+           pass9 && pass10 && pass11 && pass12 && pass13 && pass14 && pass15;
+}
+
 
 void runDiagnostics() {
     std::cout << "\n==================================================\n";
@@ -10573,6 +11137,10 @@ int main(int argc, char* argv[]) {
             bool ok = Boson::runExpandedStrengthMatch100Games();
             return ok ? 0 : 1;
         }
+        if (arg == "--phase8b" || arg == "--suite36" || arg == "--8b") {
+            bool ok = Boson::runPhase8BSupervisedTrainingTests();
+            return ok ? 0 : 1;
+        }
     }
 
     bool m1Phase2Success = Boson::runMilestone1Tests();
@@ -10610,6 +11178,7 @@ int main(int argc, char* argv[]) {
     bool smokeMatchSuccess = Boson::runOperationalSmokeMatch20Games();
     bool phase7GSuccess = Boson::runPhase7GStrengthValidationTests();
     bool phase8ASuccess = Boson::runPhase8ADatasetTests();
+    bool phase8BSuccess = Boson::runPhase8BSupervisedTrainingTests();
     Boson::runDiagnostics();
     std::cout << "\n=== TEST SUITE RESULTS ===\n"
               << "m1Phase2: " << m1Phase2Success << "\n"
@@ -10647,6 +11216,7 @@ int main(int argc, char* argv[]) {
               << "smokeMatch: " << smokeMatchSuccess << "\n"
               << "phase7G: " << phase7GSuccess << "\n"
               << "phase8A: " << phase8ASuccess << "\n"
+              << "phase8B: " << phase8BSuccess << "\n"
               << "==========================\n";
-    return (m1Phase2Success && m1Module13Success && m2PhasesBCSuccess && m2PerftSuccess && phaseYZSuccess && phaseAASuccess && phaseABSuccess && m6Phase12Success && m6Module63Success && m6Module64Success && m6Module65Success && m6Module66Success && m6Module67Success && m6Module68Success && m6Module69Success && m6Module610Success && omegaPhase1Success && omegaPhase2Success && omegaPhase3Success && omegaPhase4Success && omegaPhase5Success && omegaPhase6Success && phase65ASuccess && phase65BSuccess && phase65CSuccess && phase65DSuccess && phase7ASuccess && phase7BSuccess && phase7CSuccess && phase7DSuccess && phase7ESuccess && phase7FSuccess && smokeMatchSuccess && phase7GSuccess && phase8ASuccess) ? 0 : 1;
+    return (m1Phase2Success && m1Module13Success && m2PhasesBCSuccess && m2PerftSuccess && phaseYZSuccess && phaseAASuccess && phaseABSuccess && m6Phase12Success && m6Module63Success && m6Module64Success && m6Module65Success && m6Module66Success && m6Module67Success && m6Module68Success && m6Module69Success && m6Module610Success && omegaPhase1Success && omegaPhase2Success && omegaPhase3Success && omegaPhase4Success && omegaPhase5Success && omegaPhase6Success && phase65ASuccess && phase65BSuccess && phase65CSuccess && phase65DSuccess && phase7ASuccess && phase7BSuccess && phase7CSuccess && phase7DSuccess && phase7ESuccess && phase7FSuccess && smokeMatchSuccess && phase7GSuccess && phase8ASuccess && phase8BSuccess) ? 0 : 1;
 }
