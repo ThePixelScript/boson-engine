@@ -1,0 +1,92 @@
+{
+  "format": "BOSN_NNUE_V1",
+  "model_file": "models/boson-v2.nnue",
+  "size_bytes": 41978176,
+  "sha256": "e3a11394694652258b2f2445ad5719a67769763c8b088db1243867d17e41676e",
+  "architecture": {
+    "magic": "0x4e4e5545",
+    "version": 1,
+    "halfkp_features": 40960,
+    "accumulator_size": 512,
+    "fc1_input": 1024,
+    "fc1_output": 32,
+    "fc2_output": 32,
+    "fc3_output": 1,
+    "output_scale": 16
+  },
+  "tensors": {
+    "ft_biases": {
+      "dtype": "int16",
+      "shape": [
+        512
+      ],
+      "min": -500,
+      "max": 500,
+      "sha256": "94be82df6583d3d25fbf2cf337ae326e4f2956badba3b739a8961b33b27b3725"
+    },
+    "ft_weights": {
+      "dtype": "int16",
+      "shape": [
+        40960,
+        512
+      ],
+      "min": -200,
+      "max": 200,
+      "sha256": "e98d68a642b43a61ad265b8bbebc6f5ef8e7610e02a1925dddebf2e58d58dd5b"
+    },
+    "fc1_biases": {
+      "dtype": "int32",
+      "shape": [
+        32
+      ],
+      "min": -1,
+      "max": 8,
+      "sha256": "747012b2e9031b6a73443051acc164e1cd9b090fc6f2eb118e5b28759062cc51"
+    },
+    "fc1_weights": {
+      "dtype": "int8",
+      "shape": [
+        32,
+        1024
+      ],
+      "min": -1,
+      "max": 1,
+      "zero_count": 32289,
+      "sha256": "3c0618dc3b6437d39dd1541b331996280f60202b9a21b981336996f031aaefb1"
+    },
+    "fc2_biases": {
+      "dtype": "int32",
+      "shape": [
+        32
+      ],
+      "min": -1,
+      "max": 6,
+      "sha256": "d546b8263901fa9b52d0606abfb107bd4f0b2634dfb2e29f4182252cba5df980"
+    },
+    "fc2_weights": {
+      "dtype": "int8",
+      "shape": [
+        32,
+        32
+      ],
+      "min": -34,
+      "max": 39,
+      "zero_count": 35,
+      "sha256": "7cd8b82c5a18cbfc81356af2eb06784aa8ffe152355509dbefe40b831626b31c"
+    },
+    "fc3_bias": {
+      "dtype": "int32",
+      "val": 0
+    },
+    "fc3_weights": {
+      "dtype": "int8",
+      "shape": [
+        32
+      ],
+      "min": -1,
+      "max": 1,
+      "zero_count": 27,
+      "sha256": "3158d53f2380a582625c4fabe80cd0d902fd74d0d3e4c0385ee59b6fe4bf337d"
+    }
+  }
+}

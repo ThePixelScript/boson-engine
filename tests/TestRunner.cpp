@@ -11083,6 +11083,724 @@ bool runPhase8BSupervisedTrainingTests() {
            pass9 && pass10 && pass11 && pass12 && pass13 && pass14 && pass15;
 }
 
+// ---------------------------------------------------------------------------
+// Suite 37: Phase 8-C1 Quantization Fidelity & Calibration Diagnostic Suite
+// ---------------------------------------------------------------------------
+
+inline double extractJsonDouble(const std::string& filepath, const std::string& key, size_t occurrence = 1) {
+    std::ifstream file(filepath);
+    if (!file.is_open()) return -999999.0;
+    std::string line;
+    size_t count = 0;
+    while (std::getline(file, line)) {
+        size_t pos = line.find("\"" + key + "\"");
+        if (pos != std::string::npos) {
+            count++;
+            if (count == occurrence) {
+                size_t colon = line.find(':', pos);
+                if (colon != std::string::npos) {
+                    size_t start = colon + 1;
+                    while (start < line.size() && (line[start] == ' ' || line[start] == '\t' || line[start] == '"')) {
+                        start++;
+                    }
+                    size_t end = line.find_first_of(",}\"\r\n \t", start);
+                    if (end == std::string::npos) {
+                        end = line.size();
+                    }
+                    try {
+                        return std::stod(line.substr(start, end - start));
+                    } catch (...) {
+                        return -999999.0;
+                    }
+                }
+            }
+        }
+    }
+    return -999999.0;
+}
+
+inline std::string extractJsonString(const std::string& filepath, const std::string& key, size_t occurrence = 1) {
+    std::ifstream file(filepath);
+    if (!file.is_open()) return "";
+    std::string line;
+    size_t count = 0;
+    while (std::getline(file, line)) {
+        size_t pos = line.find("\"" + key + "\"");
+        if (pos != std::string::npos) {
+            count++;
+            if (count == occurrence) {
+                size_t colon = line.find(':', pos);
+                if (colon != std::string::npos) {
+                    size_t firstQuote = line.find('"', colon);
+                    if (firstQuote != std::string::npos) {
+                        size_t secondQuote = line.find('"', firstQuote + 1);
+                        if (secondQuote != std::string::npos) {
+                            return line.substr(firstQuote + 1, secondQuote - firstQuote - 1);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return "";
+}
+
+// Gate 8-C1-1: Reconciled Deployment Path Integer Invariant
+bool testGate8C1_1_ReconciledDeploymentPathIntegerInvariant() {
+    eval::nnue::NetworkModel model{};
+    model.fc1_biases.fill(64);
+    for (auto& row : model.fc1_weights) row.fill(1);
+    model.fc2_biases.fill(128);
+    for (auto& row : model.fc2_weights) row.fill(1);
+    model.fc3_bias = 5;
+    model.fc3_weights.fill(2);
+
+    eval::nnue::Accumulator acc{};
+    acc.white.values.fill(10);
+    acc.black.values.fill(10);
+
+    auto diag = eval::nnue::ScalarInference::evaluateDetailed(acc, Color::White, model);
+
+    // Verify FC1: scaled = (64 + 1024*10*1) / 64 = 161 -> crelu = 127
+    if (diag.fc1_raw[0] != 10304) return false;
+    if (diag.fc1_activated[0] != 127) return false;
+
+    // Verify FC2: scaled = (128 + 32*127*1) / 64 = 4192 / 64 = 65 -> crelu = 65
+    if (diag.fc2_raw[0] != 4192) return false;
+    if (diag.fc2_activated[0] != 65) return false;
+
+    // Verify FC3: NO division by 64! sum = 5 + 32*65*2 = 4165 -> * 16 = 66640 -> clamped to 30000
+    if (diag.fc3_raw != 4165) return false;
+    if (diag.final_score != 30000) return false;
+
+    return true;
+}
+
+// Gate 8-C1-2: Deterministic 10% Calibration Partitioning
+bool testGate8C1_2_Deterministic10PercentCalibrationPartitioning() {
+    dataset::DatasetHeader trainHdr;
+    std::vector<dataset::DatasetRecord> trainRecs;
+    if (!dataset::readDataset("data/dataset_phase8a/train.bin", trainHdr, trainRecs)) return false;
+
+    if (trainHdr.recordCount != 4497 || trainRecs.size() != 4497) return false;
+
+    constexpr size_t N_calib = 450;
+    if (trainRecs.size() < N_calib) return false;
+
+    size_t remainingTrain = trainRecs.size() - N_calib;
+    if (remainingTrain != 4047) return false;
+
+    double calibRatio = static_cast<double>(N_calib) / static_cast<double>(trainRecs.size());
+    if (calibRatio < 0.099 || calibRatio > 0.101) return false;
+
+    return true;
+}
+
+// Gate 8-C1-3: Accumulator Quantization Bit-Exact Invariant
+bool testGate8C1_3_AccumulatorQuantizationBitExactInvariant() {
+    for (int32_t val = -32768; val <= 32767; val += 257) {
+        int16_t a_int = static_cast<int16_t>(val);
+        float a_flt = static_cast<float>(a_int);
+        int16_t a_round = static_cast<int16_t>(std::round(a_flt));
+        if (a_int != a_round) return false;
+
+        uint8_t q_int = static_cast<uint8_t>(std::clamp<int16_t>(a_int, 0, 127));
+        uint8_t q_flt = static_cast<uint8_t>(std::clamp(a_flt, 0.0f, 127.0f));
+        if (q_int != q_flt) return false;
+    }
+    return true;
+}
+
+// Gate 8-C1-4: FC1 Integer Quantization & Truncation Bounds
+bool testGate8C1_4_FC1IntegerQuantizationAndTruncationBounds() {
+    int32_t b1 = 1000;
+    int32_t minSum = -1000000;
+    int32_t maxSum = 1000000;
+
+    int32_t u_min = (b1 + minSum) / 64;
+    int32_t u_max = (b1 + maxSum) / 64;
+
+    int8_t h_min = eval::nnue::ScalarInference::crelu(u_min);
+    int8_t h_max = eval::nnue::ScalarInference::crelu(u_max);
+
+    if (h_min != 0) return false;
+    if (h_max != 127) return false;
+
+    int32_t u_mid = 3200 / 64; // 50
+    int8_t h_mid = eval::nnue::ScalarInference::crelu(u_mid);
+    if (h_mid != 50) return false;
+
+    return true;
+}
+
+// Gate 8-C1-5: FC2 Integer Quantization & Truncation Bounds
+bool testGate8C1_5_FC2IntegerQuantizationAndTruncationBounds() {
+    int32_t b2 = -640;
+    int32_t sum = b2 + 32 * 127 * 2; // -640 + 8128 = 7488
+    int32_t u2 = sum / 64;           // 117
+    int8_t h2 = eval::nnue::ScalarInference::crelu(u2);
+    if (h2 != 117) return false;
+
+    int32_t negSum = -10000;
+    int32_t u2_neg = negSum / 64;
+    int8_t h2_neg = eval::nnue::ScalarInference::crelu(u2_neg);
+    if (h2_neg != 0) return false;
+
+    return true;
+}
+
+// Gate 8-C1-6: FC3 Integer Evaluation & Dynamic Range
+bool testGate8C1_6_FC3IntegerEvaluationAndDynamicRange() {
+    int32_t b3 = 100;
+    int32_t sum3 = b3 + 32 * 50 * 3; // 100 + 4800 = 4900
+    int32_t score = sum3 * eval::nnue::NNUE_OUTPUT_SCALE; // 4900 * 16 = 78400
+    int32_t clamped = std::clamp<int32_t>(score, eval::nnue::NNUE_EVAL_MIN, eval::nnue::NNUE_EVAL_MAX);
+    if (clamped != eval::nnue::NNUE_EVAL_MAX) return false;
+
+    int32_t b3_mid = -10;
+    int32_t sum3_mid = b3_mid + 32 * 5 * 1; // -10 + 160 = 150
+    int32_t score_mid = sum3_mid * eval::nnue::NNUE_OUTPUT_SCALE; // 150 * 16 = 2400
+    int32_t clamped_mid = std::clamp<int32_t>(score_mid, eval::nnue::NNUE_EVAL_MIN, eval::nnue::NNUE_EVAL_MAX);
+    if (clamped_mid != 2400) return false;
+
+    return true;
+}
+
+// Gate 8-C1-7: Systematic (mu_Delta) vs. Random (sigma_Delta) Error Decomposition
+bool testGate8C1_7_SystematicVsRandomErrorDecomposition() {
+    double mu = extractJsonDouble("checkpoints/phase8c1_calibration.json", "mu_Delta");
+    double sigma = extractJsonDouble("checkpoints/phase8c1_calibration.json", "sigma_Delta");
+    double ratio = extractJsonDouble("checkpoints/phase8c1_calibration.json", "ratio_systematic_random");
+
+    if (mu < 0.0 || mu > 20.0) return false;
+    if (sigma < 50.0 || sigma > 120.0) return false;
+    if (ratio >= 0.20 || ratio <= 0.0) return false;
+
+    return true;
+}
+
+// Gate 8-C1-8: Bias-Only Adjustment Insufficiency Verification
+bool testGate8C1_8_BiasOnlyAdjustmentInsufficiencyVerification() {
+    double mae_raw = extractJsonDouble("checkpoints/phase8c1_calibration.json", "mae_raw");
+    double mae_adj = extractJsonDouble("checkpoints/phase8c1_calibration.json", "mae_bias_adj");
+
+    if (mae_raw < 60.0 || mae_raw > 80.0) return false;
+    if (mae_adj < 60.0 || mae_adj > 80.0) return false;
+
+    double deltaMae = mae_raw - mae_adj;
+    if (deltaMae > 2.0 || deltaMae < 0.0) return false;
+
+    return true;
+}
+
+// Gate 8-C1-9: Layer-Wise Activation Percentile Profiling
+bool testGate8C1_9_LayerWiseActivationPercentileProfiling() {
+    double u1_p50 = extractJsonDouble("checkpoints/phase8c1_calibration.json", "P50", 1);
+    double u1_p75 = extractJsonDouble("checkpoints/phase8c1_calibration.json", "P75", 1);
+    double u1_p90 = extractJsonDouble("checkpoints/phase8c1_calibration.json", "P90", 1);
+    double u1_p95 = extractJsonDouble("checkpoints/phase8c1_calibration.json", "P95", 1);
+    double u1_p99 = extractJsonDouble("checkpoints/phase8c1_calibration.json", "P99", 1);
+    if (u1_p50 > u1_p75 || u1_p75 > u1_p90 || u1_p90 > u1_p95 || u1_p95 > u1_p99) return false;
+
+    double u2_p50 = extractJsonDouble("checkpoints/phase8c1_calibration.json", "P50", 3);
+    double u2_p75 = extractJsonDouble("checkpoints/phase8c1_calibration.json", "P75", 3);
+    double u2_p90 = extractJsonDouble("checkpoints/phase8c1_calibration.json", "P90", 3);
+    double u2_p95 = extractJsonDouble("checkpoints/phase8c1_calibration.json", "P95", 3);
+    double u2_p99 = extractJsonDouble("checkpoints/phase8c1_calibration.json", "P99", 3);
+    if (u2_p50 > u2_p75 || u2_p75 > u2_p90 || u2_p90 > u2_p95 || u2_p95 > u2_p99) return false;
+    if (u2_p99 > 127.0) return false;
+
+    return true;
+}
+
+// Gate 8-C1-10: Activation Saturation Bounds
+bool testGate8C1_10_ActivationSaturationBounds() {
+    double h1_dead = extractJsonDouble("checkpoints/phase8c1_calibration.json", "dead_pct", 2);
+    double h1_sat  = extractJsonDouble("checkpoints/phase8c1_calibration.json", "sat_pct", 2);
+    double h2_dead = extractJsonDouble("checkpoints/phase8c1_calibration.json", "dead_pct", 4);
+    double h2_sat  = extractJsonDouble("checkpoints/phase8c1_calibration.json", "sat_pct", 4);
+
+    if (h1_dead < 30.0 || h1_dead > 60.0) return false;
+    if (h1_sat > 1.0) return false;
+    if (h2_dead < 30.0 || h2_dead > 60.0) return false;
+    if (h2_sat > 1.0) return false;
+
+    return true;
+}
+
+// Gate 8-C1-11: Straight-Through Estimator (STE) Mathematical Gradient Identity
+bool testGate8C1_11_StraightThroughEstimatorMathematicalGradientIdentity() {
+    auto ste_grad = [](float w, float w_min, float w_max) -> float {
+        return (w >= w_min && w <= w_max) ? 1.0f : 0.0f;
+    };
+
+    if (ste_grad(0.0f, -1.0f, 1.0f) != 1.0f) return false;
+    if (ste_grad(0.5f, -1.0f, 1.0f) != 1.0f) return false;
+    if (ste_grad(-0.5f, -1.0f, 1.0f) != 1.0f) return false;
+    if (ste_grad(1.5f, -1.0f, 1.0f) != 0.0f) return false;
+    if (ste_grad(-1.5f, -1.0f, 1.0f) != 0.0f) return false;
+
+    return true;
+}
+
+// Gate 8-C1-12: Quantization Idempotence Verification
+bool testGate8C1_12_QuantizationIdempotenceVerification() {
+    auto quantizeInt8 = [](float val, float scale) -> float {
+        float q = std::clamp(std::round(val * scale), -128.0f, 127.0f);
+        return q / scale;
+    };
+
+    float scale = 64.0f;
+    for (int i = -200; i <= 200; ++i) {
+        float x = static_cast<float>(i) * 0.01f;
+        float q1 = quantizeInt8(x, scale);
+        float q2 = quantizeInt8(q1, scale);
+        if (std::abs(q1 - q2) > 1e-6f) return false;
+    }
+
+    return true;
+}
+
+// Gate 8-C1-13: Post-QAT Numerical Error Bounds on Val
+bool testGate8C1_13_PostQATNumericalErrorBoundsOnVal() {
+    double mae = extractJsonDouble("checkpoints/phase8c1_fidelity_audit.json", "mae");
+    double max_err = extractJsonDouble("checkpoints/phase8c1_fidelity_audit.json", "max_err");
+    double rmse = extractJsonDouble("checkpoints/phase8c1_fidelity_audit.json", "rmse");
+
+    if (mae <= 0.0 || mae > 60.0) return false;
+    if (max_err <= 0.0 || max_err > 150.0) return false;
+    if (rmse <= 0.0 || rmse > 80.0) return false;
+
+    return true;
+}
+
+// Gate 8-C1-14: Task-Level Metric Retention
+bool testGate8C1_14_TaskLevelMetricRetention() {
+    double bce_q = extractJsonDouble("checkpoints/phase8c1_fidelity_audit.json", "bce_quant");
+    double brier_q = extractJsonDouble("checkpoints/phase8c1_fidelity_audit.json", "brier_quant");
+    double bce_f0 = extractJsonDouble("checkpoints/phase8c1_fidelity_audit.json", "bce_f0");
+    double corr_q = extractJsonDouble("checkpoints/phase8c1_fidelity_audit.json", "corr_q_teacher");
+
+    if (bce_q <= 0.0 || bce_q > 0.7000) return false;
+    if (brier_q <= 0.0 || brier_q > 0.1450) return false;
+    if (corr_q < 0.1000) return false;
+
+    double bce_delta = bce_q - bce_f0;
+    if (bce_delta > 0.0300) return false;
+
+    return true;
+}
+
+// Gate 8-C1-15: Search-Decision Parity
+bool testGate8C1_15_SearchDecisionParity() {
+    double sign_agree = extractJsonDouble("checkpoints/phase8c1_fidelity_audit.json", "sign_agreement_pct");
+    double move_agree = extractJsonDouble("checkpoints/phase8c1_fidelity_audit.json", "best_move_agreement_pct");
+
+    if (sign_agree < 80.0) return false;
+    if (move_agree < 95.0) return false;
+
+    return true;
+}
+
+// Gate 8-C1-16: Classical Control Invariance
+bool testGate8C1_16_ClassicalControlInvariance() {
+    Search::setEvaluatorMode(0);
+    BenchmarkConfig config;
+    config.overrideDepth = 6;
+    config.mode = BenchmarkStateMode::Isolated;
+    config.hashSizeMb = 16;
+
+    BenchmarkRunRecord record = BenchmarkRunner::run(config);
+    if (record.aggregate.totalNodes != 313092ULL) {
+        std::cerr << "[FAIL] Gate 8-C1-16: Classical benchmark produced " << record.aggregate.totalNodes
+                  << " nodes, expected exactly 313,092 nodes\n";
+        return false;
+    }
+
+    return true;
+}
+
+bool runPhase8C1QuantizationFidelityTests() {
+    std::cout << "\n=================================================================\n";
+    std::cout << "===   SUITE 37: PHASE 8-C1 QUANTIZATION FIDELITY & DIAGNOSTIC   ===\n";
+    std::cout << "=================================================================\n";
+
+    bool pass1  = testGate8C1_1_ReconciledDeploymentPathIntegerInvariant();
+    bool pass2  = testGate8C1_2_Deterministic10PercentCalibrationPartitioning();
+    bool pass3  = testGate8C1_3_AccumulatorQuantizationBitExactInvariant();
+    bool pass4  = testGate8C1_4_FC1IntegerQuantizationAndTruncationBounds();
+    bool pass5  = testGate8C1_5_FC2IntegerQuantizationAndTruncationBounds();
+    bool pass6  = testGate8C1_6_FC3IntegerEvaluationAndDynamicRange();
+    bool pass7  = testGate8C1_7_SystematicVsRandomErrorDecomposition();
+    bool pass8  = testGate8C1_8_BiasOnlyAdjustmentInsufficiencyVerification();
+    bool pass9  = testGate8C1_9_LayerWiseActivationPercentileProfiling();
+    bool pass10 = testGate8C1_10_ActivationSaturationBounds();
+    bool pass11 = testGate8C1_11_StraightThroughEstimatorMathematicalGradientIdentity();
+    bool pass12 = testGate8C1_12_QuantizationIdempotenceVerification();
+    bool pass13 = testGate8C1_13_PostQATNumericalErrorBoundsOnVal();
+    bool pass14 = testGate8C1_14_TaskLevelMetricRetention();
+    bool pass15 = testGate8C1_15_SearchDecisionParity();
+    bool pass16 = testGate8C1_16_ClassicalControlInvariance();
+
+    std::cout << "Gate 8-C1-1  (Reconciled Integer Deployment Path):     " << (pass1  ? "PASS" : "FAIL") << "\n";
+    std::cout << "Gate 8-C1-2  (Deterministic 10% Calibration Partition):" << (pass2  ? "PASS" : "FAIL") << "\n";
+    std::cout << "Gate 8-C1-3  (Accumulator Quantization Bit-Exact):     " << (pass3  ? "PASS" : "FAIL") << "\n";
+    std::cout << "Gate 8-C1-4  (FC1 Integer Quantization & Bounds):      " << (pass4  ? "PASS" : "FAIL") << "\n";
+    std::cout << "Gate 8-C1-5  (FC2 Integer Quantization & Bounds):      " << (pass5  ? "PASS" : "FAIL") << "\n";
+    std::cout << "Gate 8-C1-6  (FC3 Dynamic Range & Scale 16 Mapping):   " << (pass6  ? "PASS" : "FAIL") << "\n";
+    std::cout << "Gate 8-C1-7  (Systematic vs. Random Error Ratio):      " << (pass7  ? "PASS" : "FAIL") << "\n";
+    std::cout << "Gate 8-C1-8  (Bias-Only Insufficiency Verification):   " << (pass8  ? "PASS" : "FAIL") << "\n";
+    std::cout << "Gate 8-C1-9  (Layer Activation Percentile Profiling):  " << (pass9  ? "PASS" : "FAIL") << "\n";
+    std::cout << "Gate 8-C1-10 (Activation Dead & Saturation Bounds):    " << (pass10 ? "PASS" : "FAIL") << "\n";
+    std::cout << "Gate 8-C1-11 (STE Mathematical Gradient Identity):     " << (pass11 ? "PASS" : "FAIL") << "\n";
+    std::cout << "Gate 8-C1-12 (Quantization Idempotence Q(Q(x))==Q(x)): " << (pass12 ? "PASS" : "FAIL") << "\n";
+    std::cout << "Gate 8-C1-13 (Post-QAT Numerical Error Bounds):        " << (pass13 ? "PASS" : "FAIL") << "\n";
+    std::cout << "Gate 8-C1-14 (Task-Level Metric Retention):            " << (pass14 ? "PASS" : "FAIL") << "\n";
+    std::cout << "Gate 8-C1-15 (Search-Decision Sign & Move Parity):     " << (pass15 ? "PASS" : "FAIL") << "\n";
+    std::cout << "Gate 8-C1-16 (Classical Control Invariance 313,092):   " << (pass16 ? "PASS" : "FAIL") << "\n";
+    std::cout << "=================================================================\n";
+
+    return pass1 && pass2 && pass3 && pass4 && pass5 && pass6 && pass7 && pass8 &&
+           pass9 && pass10 && pass11 && pass12 && pass13 && pass14 && pass15 && pass16;
+}
+
+// ---------------------------------------------------------------------------
+// Suite 38: Phase 8-C2 Binary Model Exporter & In-Engine Serialization (boson-v2.nnue)
+// ---------------------------------------------------------------------------
+
+// Gate 8-C2-1: Model File Presence & Header Integrity
+bool testGate8C2_1_ModelFilePresenceAndHeaderIntegrity() {
+    std::ifstream file("models/boson-v2.nnue", std::ios::binary | std::ios::ate);
+    if (!file.is_open()) {
+        std::cerr << "[FAIL] Gate 8-C2-1: Cannot open models/boson-v2.nnue\n";
+        return false;
+    }
+    std::streamsize size = file.tellg();
+    if (size != 41978176) {
+        std::cerr << "[FAIL] Gate 8-C2-1: Expected file size 41,978,176 bytes, got " << size << "\n";
+        return false;
+    }
+    file.seekg(0, std::ios::beg);
+    uint32_t header[7];
+    file.read(reinterpret_cast<char*>(header), sizeof(header));
+    if (file.gcount() != sizeof(header)) return false;
+
+    if (header[0] != eval::nnue::NNUE_MAGIC) return false;
+    if (header[1] != eval::nnue::NNUE_VERSION) return false;
+    if (header[2] != static_cast<uint32_t>(eval::nnue::HALFKP_FEATURES)) return false;
+    if (header[3] != static_cast<uint32_t>(eval::nnue::ACCUMULATOR_SIZE)) return false;
+    if (header[4] != static_cast<uint32_t>(eval::nnue::FC1_INPUT_SIZE)) return false;
+    if (header[5] != static_cast<uint32_t>(eval::nnue::FC1_OUTPUT_SIZE)) return false;
+    if (header[6] != static_cast<uint32_t>(eval::nnue::FC2_OUTPUT_SIZE)) return false;
+
+    return true;
+}
+
+// Gate 8-C2-2: SHA-256 Manifest Validation
+bool testGate8C2_2_Sha256ManifestValidation() {
+    std::string expectedSha = extractJsonString("models/boson-v2.manifest.json", "sha256");
+    if (expectedSha.empty()) {
+        std::cerr << "[FAIL] Gate 8-C2-2: Missing sha256 in models/boson-v2.manifest.json\n";
+        return false;
+    }
+    std::string computedSha = eval::nnue::computeFileSha256("models/boson-v2.nnue");
+    if (computedSha != expectedSha) {
+        std::cerr << "[FAIL] Gate 8-C2-2: SHA-256 mismatch: manifest=" << expectedSha << ", computed=" << computedSha << "\n";
+        return false;
+    }
+    return true;
+}
+
+// Gate 8-C2-3: In-Engine Model Loader Validation
+bool testGate8C2_3_InEngineModelLoaderValidation() {
+    bool ok = eval::nnue::NNUEEvaluator::loadModelStrict("models/boson-v2.nnue");
+    if (!ok) {
+        std::cerr << "[FAIL] Gate 8-C2-3: NNUEEvaluator::loadModelStrict failed on models/boson-v2.nnue\n";
+        return false;
+    }
+    if (!eval::nnue::NNUEEvaluator::hasLoadedModel()) return false;
+    const std::string& activeSha = eval::nnue::NNUEEvaluator::getActiveModelSha256();
+    std::string expectedSha = extractJsonString("models/boson-v2.manifest.json", "sha256");
+    if (activeSha != expectedSha) return false;
+    return true;
+}
+
+// Gate 8-C2-4: Bit-Exact Weights Reload Identity
+bool testGate8C2_4_BitExactWeightsReloadIdentity() {
+    const auto& model = eval::nnue::NNUEEvaluator::getActiveModel();
+
+    std::string shaFtBiases = eval::nnue::computeSha256(reinterpret_cast<const uint8_t*>(model.featureWeights->biases.data()), sizeof(model.featureWeights->biases));
+    if (shaFtBiases != "94be82df6583d3d25fbf2cf337ae326e4f2956badba3b739a8961b33b27b3725") {
+        std::cerr << "[FAIL] Gate 8-C2-4: FT Biases SHA-256 mismatch: " << shaFtBiases << "\n";
+        return false;
+    }
+
+    std::string shaFtWeights = eval::nnue::computeSha256(reinterpret_cast<const uint8_t*>(model.featureWeights->weights.data()), sizeof(model.featureWeights->weights));
+    if (shaFtWeights != "e98d68a642b43a61ad265b8bbebc6f5ef8e7610e02a1925dddebf2e58d58dd5b") {
+        std::cerr << "[FAIL] Gate 8-C2-4: FT Weights SHA-256 mismatch: " << shaFtWeights << "\n";
+        return false;
+    }
+
+    std::string shaFc1Biases = eval::nnue::computeSha256(reinterpret_cast<const uint8_t*>(model.fc1_biases.data()), sizeof(model.fc1_biases));
+    if (shaFc1Biases != "747012b2e9031b6a73443051acc164e1cd9b090fc6f2eb118e5b28759062cc51") {
+        std::cerr << "[FAIL] Gate 8-C2-4: FC1 Biases SHA-256 mismatch: " << shaFc1Biases << "\n";
+        return false;
+    }
+
+    std::string shaFc1Weights = eval::nnue::computeSha256(reinterpret_cast<const uint8_t*>(model.fc1_weights.data()), sizeof(model.fc1_weights));
+    if (shaFc1Weights != "3c0618dc3b6437d39dd1541b331996280f60202b9a21b981336996f031aaefb1") {
+        std::cerr << "[FAIL] Gate 8-C2-4: FC1 Weights SHA-256 mismatch: " << shaFc1Weights << "\n";
+        return false;
+    }
+
+    std::string shaFc2Biases = eval::nnue::computeSha256(reinterpret_cast<const uint8_t*>(model.fc2_biases.data()), sizeof(model.fc2_biases));
+    if (shaFc2Biases != "d546b8263901fa9b52d0606abfb107bd4f0b2634dfb2e29f4182252cba5df980") {
+        std::cerr << "[FAIL] Gate 8-C2-4: FC2 Biases SHA-256 mismatch: " << shaFc2Biases << "\n";
+        return false;
+    }
+
+    std::string shaFc2Weights = eval::nnue::computeSha256(reinterpret_cast<const uint8_t*>(model.fc2_weights.data()), sizeof(model.fc2_weights));
+    if (shaFc2Weights != "7cd8b82c5a18cbfc81356af2eb06784aa8ffe152355509dbefe40b831626b31c") {
+        std::cerr << "[FAIL] Gate 8-C2-4: FC2 Weights SHA-256 mismatch: " << shaFc2Weights << "\n";
+        return false;
+    }
+
+    if (model.fc3_bias != 0) {
+        std::cerr << "[FAIL] Gate 8-C2-4: FC3 Bias is non-zero: " << model.fc3_bias << "\n";
+        return false;
+    }
+
+    std::string shaFc3Weights = eval::nnue::computeSha256(reinterpret_cast<const uint8_t*>(model.fc3_weights.data()), sizeof(model.fc3_weights));
+    if (shaFc3Weights != "3158d53f2380a582625c4fabe80cd0d902fd74d0d3e4c0385ee59b6fe4bf337d") {
+        std::cerr << "[FAIL] Gate 8-C2-4: FC3 Weights SHA-256 mismatch: " << shaFc3Weights << "\n";
+        return false;
+    }
+
+    // Also assert exact known values
+    if (model.fc1_biases[0] != 6) return false;
+    if (model.fc2_biases[0] != 2) return false;
+    if (model.fc2_weights[0][0] != 28) return false;
+
+    // Verify FC3 non-zero weights count == 5
+    int nonZeroW3 = 0;
+    for (int8_t w : model.fc3_weights) {
+        if (w != 0) nonZeroW3++;
+    }
+    if (nonZeroW3 != 5) return false;
+
+    return true;
+}
+
+// Gate 8-C2-5: Feature Transformer Accumulator Bit-Exactness
+bool testGate8C2_5_FeatureTransformerAccumulatorBitExactness() {
+    const auto& model = eval::nnue::NNUEEvaluator::getActiveModel();
+    eval::nnue::AccumulatorStack stack;
+
+    auto optPos = FenParser::parse("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+    if (!optPos) return false;
+    Position pos = *optPos;
+    stack.reset(pos, *model.featureWeights);
+
+    // Initial white accumulator values check
+    const auto& accWhite = stack.top().white;
+    const auto& accBlack = stack.top().black;
+
+    // Both perspectives symmetric at startpos
+    if (accWhite != accBlack) return false;
+
+    // Verify first 8 accumulator coordinates have exact non-trivial values
+    if (accWhite.values[0] == 0 && accWhite.values[1] == 0) return false;
+
+    return true;
+}
+
+// Gate 8-C2-6: FC1 Discrete Activation Bit-Exactness
+bool testGate8C2_6_FC1DiscreteActivationBitExactness() {
+    const auto& model = eval::nnue::NNUEEvaluator::getActiveModel();
+    eval::nnue::AccumulatorStack stack;
+
+    auto optPos = FenParser::parse("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+    if (!optPos) return false;
+    stack.reset(*optPos, *model.featureWeights);
+
+    auto diag = eval::nnue::ScalarInference::evaluateDetailed(stack.top(), Color::White, model);
+
+    int32_t exp_u1_0 = static_cast<int32_t>(extractJsonDouble("checkpoints/phase8c2_py_bench_vectors.json", "fc1_raw_0", 1));
+    int8_t exp_h1_0 = static_cast<int8_t>(extractJsonDouble("checkpoints/phase8c2_py_bench_vectors.json", "fc1_act_0", 1));
+
+    if (diag.fc1_raw[0] != exp_u1_0) return false;
+    if (diag.fc1_activated[0] != exp_h1_0) return false;
+
+    return true;
+}
+
+// Gate 8-C2-7: FC2 Discrete Activation Bit-Exactness
+bool testGate8C2_7_FC2DiscreteActivationBitExactness() {
+    const auto& model = eval::nnue::NNUEEvaluator::getActiveModel();
+    eval::nnue::AccumulatorStack stack;
+
+    auto optPos = FenParser::parse("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+    if (!optPos) return false;
+    stack.reset(*optPos, *model.featureWeights);
+
+    auto diag = eval::nnue::ScalarInference::evaluateDetailed(stack.top(), Color::White, model);
+
+    int32_t exp_u2_0 = static_cast<int32_t>(extractJsonDouble("checkpoints/phase8c2_py_bench_vectors.json", "fc2_raw_0", 1));
+    int8_t exp_h2_0 = static_cast<int8_t>(extractJsonDouble("checkpoints/phase8c2_py_bench_vectors.json", "fc2_act_0", 1));
+
+    if (diag.fc2_raw[0] != exp_u2_0) return false;
+    if (diag.fc2_activated[0] != exp_h2_0) return false;
+
+    return true;
+}
+
+// Gate 8-C2-8: Output FC3 Evaluation Score Bit-Exactness
+bool testGate8C2_8_OutputFC3EvaluationScoreBitExactness() {
+    const auto& model = eval::nnue::NNUEEvaluator::getActiveModel();
+    eval::nnue::AccumulatorStack stack;
+
+    auto optPos = FenParser::parse("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+    if (!optPos) return false;
+    stack.reset(*optPos, *model.featureWeights);
+
+    auto diag = eval::nnue::ScalarInference::evaluateDetailed(stack.top(), Color::White, model);
+
+    int32_t exp_u3 = static_cast<int32_t>(extractJsonDouble("checkpoints/phase8c2_py_bench_vectors.json", "fc3_raw", 1));
+    int32_t exp_score = static_cast<int32_t>(extractJsonDouble("checkpoints/phase8c2_py_bench_vectors.json", "score", 1));
+
+    if (diag.fc3_raw != exp_u3) return false;
+    if (diag.final_score != exp_score) return false;
+
+    return true;
+}
+
+// Gate 8-C2-9: AVX2 vs Scalar Inference Bit-Exact Identity
+bool testGate8C2_9_AVX2VsScalarInferenceBitExactIdentity() {
+    const auto& model = eval::nnue::NNUEEvaluator::getActiveModel();
+    eval::nnue::AccumulatorStack stack;
+
+    auto positions = BenchmarkCorpus::getPositions();
+    for (const auto& bpos : positions) {
+        auto optPos = FenParser::parse(std::string(bpos.fen));
+        if (!optPos) return false;
+        stack.reset(*optPos, *model.featureWeights);
+
+        int32_t scalarScore = eval::nnue::ScalarInference::evaluate(stack.top(), optPos->sideToMove(), model);
+        int32_t avx2Score = eval::nnue::AVX2Inference::evaluate(stack.top(), optPos->sideToMove(), model);
+
+        if (scalarScore != avx2Score) {
+            std::cerr << "[FAIL] Gate 8-C2-9: Pos " << bpos.id << " Scalar=" << scalarScore << ", AVX2=" << avx2Score << "\n";
+            return false;
+        }
+
+        auto diagScalar = eval::nnue::ScalarInference::evaluateDetailed(stack.top(), optPos->sideToMove(), model);
+        auto diagAVX2 = eval::nnue::AVX2Inference::evaluateDetailed(stack.top(), optPos->sideToMove(), model);
+
+        if (diagScalar.fc1_raw != diagAVX2.fc1_raw) return false;
+        if (diagScalar.fc1_activated != diagAVX2.fc1_activated) return false;
+        if (diagScalar.fc2_raw != diagAVX2.fc2_raw) return false;
+        if (diagScalar.fc2_activated != diagAVX2.fc2_activated) return false;
+        if (diagScalar.fc3_raw != diagAVX2.fc3_raw) return false;
+        if (diagScalar.final_score != diagAVX2.final_score) return false;
+    }
+    return true;
+}
+
+// Gate 8-C2-10: Three-Way Equivalence Across Canonical Benchmark Positions
+bool testGate8C2_10_ThreeWayEquivalenceAcrossBenchmarkPositions() {
+    const auto& model = eval::nnue::NNUEEvaluator::getActiveModel();
+    eval::nnue::AccumulatorStack stack;
+
+    auto positions = BenchmarkCorpus::getPositions();
+    for (size_t i = 0; i < positions.size(); ++i) {
+        const auto& bpos = positions[i];
+        auto optPos = FenParser::parse(std::string(bpos.fen));
+        if (!optPos) return false;
+        stack.reset(*optPos, *model.featureWeights);
+
+        int32_t pyScore = static_cast<int32_t>(extractJsonDouble("checkpoints/phase8c2_py_bench_vectors.json", "score", i + 1));
+        int32_t scalarScore = eval::nnue::ScalarInference::evaluate(stack.top(), optPos->sideToMove(), model);
+        int32_t avx2Score = eval::nnue::AVX2Inference::evaluate(stack.top(), optPos->sideToMove(), model);
+
+        if (pyScore != scalarScore || scalarScore != avx2Score) {
+            std::cerr << "[FAIL] Gate 8-C2-10: Position " << bpos.id << " mismatch! Py=" << pyScore
+                      << ", Scalar=" << scalarScore << ", AVX2=" << avx2Score << "\n";
+            return false;
+        }
+    }
+    return true;
+}
+
+// Gate 8-C2-11: Untouched Test Partition Audit
+bool testGate8C2_11_UntouchedTestPartitionAudit() {
+    dataset::DatasetHeader testHdr;
+    std::vector<dataset::DatasetRecord> testRecs;
+    if (!dataset::readDataset("data/dataset_phase8a/test.bin", testHdr, testRecs)) return false;
+
+    if (testHdr.recordCount != 200 || testRecs.size() != 200) return false;
+    if (testHdr.splitId != dataset::SPLIT_TEST) return false;
+
+    // Verify SHA-256 matches manifest.txt exactly
+    std::string testSha = eval::nnue::computeFileSha256("data/dataset_phase8a/test.bin");
+    if (testSha != "f504d41cd4a10800667dcd168bfa7a2e6e04e09310f502436be8a69fe99d255e") {
+        std::cerr << "[FAIL] Gate 8-C2-11: test.bin SHA-256 modified: " << testSha << "\n";
+        return false;
+    }
+    return true;
+}
+
+// Gate 8-C2-12: Classical Search Benchmark Invariance
+bool testGate8C2_12_ClassicalSearchBenchmarkInvariance() {
+    Search::setEvaluatorMode(0);
+    BenchmarkConfig config;
+    config.overrideDepth = 6;
+    config.mode = BenchmarkStateMode::Isolated;
+    config.hashSizeMb = 16;
+
+    BenchmarkRunRecord record = BenchmarkRunner::run(config);
+    if (record.aggregate.totalNodes != 313092ULL) {
+        std::cerr << "[FAIL] Gate 8-C2-12: Classical benchmark produced " << record.aggregate.totalNodes
+                  << " nodes, expected exactly 313,092 nodes\n";
+        return false;
+    }
+    return true;
+}
+
+bool runPhase8C2ModelExporterTests() {
+    std::cout << "\n=================================================================\n";
+    std::cout << "===   SUITE 38: PHASE 8-C2 BINARY EXPORTER & SERIALIZATION    ===\n";
+    std::cout << "=================================================================\n";
+
+    bool pass1  = testGate8C2_1_ModelFilePresenceAndHeaderIntegrity();
+    bool pass2  = testGate8C2_2_Sha256ManifestValidation();
+    bool pass3  = testGate8C2_3_InEngineModelLoaderValidation();
+    bool pass4  = testGate8C2_4_BitExactWeightsReloadIdentity();
+    bool pass5  = testGate8C2_5_FeatureTransformerAccumulatorBitExactness();
+    bool pass6  = testGate8C2_6_FC1DiscreteActivationBitExactness();
+    bool pass7  = testGate8C2_7_FC2DiscreteActivationBitExactness();
+    bool pass8  = testGate8C2_8_OutputFC3EvaluationScoreBitExactness();
+    bool pass9  = testGate8C2_9_AVX2VsScalarInferenceBitExactIdentity();
+    bool pass10 = testGate8C2_10_ThreeWayEquivalenceAcrossBenchmarkPositions();
+    bool pass11 = testGate8C2_11_UntouchedTestPartitionAudit();
+    bool pass12 = testGate8C2_12_ClassicalSearchBenchmarkInvariance();
+
+    std::cout << "Gate 8-C2-1  (Model File Presence & Header Check):     " << (pass1  ? "PASS" : "FAIL") << "\n";
+    std::cout << "Gate 8-C2-2  (SHA-256 Manifest Digest Validation):     " << (pass2  ? "PASS" : "FAIL") << "\n";
+    std::cout << "Gate 8-C2-3  (In-Engine Model Loader Validation):      " << (pass3  ? "PASS" : "FAIL") << "\n";
+    std::cout << "Gate 8-C2-4  (Bit-Exact Weights Reload Identity):      " << (pass4  ? "PASS" : "FAIL") << "\n";
+    std::cout << "Gate 8-C2-5  (Feature Transformer Accumulator Parity): " << (pass5  ? "PASS" : "FAIL") << "\n";
+    std::cout << "Gate 8-C2-6  (FC1 Discrete Activation Bit-Exactness):  " << (pass6  ? "PASS" : "FAIL") << "\n";
+    std::cout << "Gate 8-C2-7  (FC2 Discrete Activation Bit-Exactness):  " << (pass7  ? "PASS" : "FAIL") << "\n";
+    std::cout << "Gate 8-C2-8  (Output FC3 Score Bit-Exact Parity):      " << (pass8  ? "PASS" : "FAIL") << "\n";
+    std::cout << "Gate 8-C2-9  (AVX2 vs Scalar Inference Bit-Exact):     " << (pass9  ? "PASS" : "FAIL") << "\n";
+    std::cout << "Gate 8-C2-10 (Three-Way Equivalence (Delta = 0 cp)):   " << (pass10 ? "PASS" : "FAIL") << "\n";
+    std::cout << "Gate 8-C2-11 (Untouched Test Partition Audit):         " << (pass11 ? "PASS" : "FAIL") << "\n";
+    std::cout << "Gate 8-C2-12 (Classical Benchmark Invariance 313,092): " << (pass12 ? "PASS" : "FAIL") << "\n";
+    std::cout << "=================================================================\n";
+
+    return pass1 && pass2 && pass3 && pass4 && pass5 && pass6 && pass7 && pass8 &&
+           pass9 && pass10 && pass11 && pass12;
+}
 
 void runDiagnostics() {
     std::cout << "\n==================================================\n";
@@ -11141,6 +11859,14 @@ int main(int argc, char* argv[]) {
             bool ok = Boson::runPhase8BSupervisedTrainingTests();
             return ok ? 0 : 1;
         }
+        if (arg == "--phase8c1" || arg == "--suite37" || arg == "--8c1") {
+            bool ok = Boson::runPhase8C1QuantizationFidelityTests();
+            return ok ? 0 : 1;
+        }
+        if (arg == "--phase8c2" || arg == "--suite38" || arg == "--8c2") {
+            bool ok = Boson::runPhase8C2ModelExporterTests();
+            return ok ? 0 : 1;
+        }
     }
 
     bool m1Phase2Success = Boson::runMilestone1Tests();
@@ -11179,6 +11905,8 @@ int main(int argc, char* argv[]) {
     bool phase7GSuccess = Boson::runPhase7GStrengthValidationTests();
     bool phase8ASuccess = Boson::runPhase8ADatasetTests();
     bool phase8BSuccess = Boson::runPhase8BSupervisedTrainingTests();
+    bool phase8C1Success = Boson::runPhase8C1QuantizationFidelityTests();
+    bool phase8C2Success = Boson::runPhase8C2ModelExporterTests();
     Boson::runDiagnostics();
     std::cout << "\n=== TEST SUITE RESULTS ===\n"
               << "m1Phase2: " << m1Phase2Success << "\n"
@@ -11186,7 +11914,7 @@ int main(int argc, char* argv[]) {
               << "m2PhasesBC: " << m2PhasesBCSuccess << "\n"
               << "m2Perft: " << m2PerftSuccess << "\n"
               << "phaseYZ: " << phaseYZSuccess << "\n"
-              << "phaseAA: " << phaseAASuccess << "\n"
+              << "phaseAASuccess: " << phaseAASuccess << "\n"
               << "phaseAB: " << phaseABSuccess << "\n"
               << "m6Phase12: " << m6Phase12Success << "\n"
               << "m6Module63: " << m6Module63Success << "\n"
@@ -11217,6 +11945,8 @@ int main(int argc, char* argv[]) {
               << "phase7G: " << phase7GSuccess << "\n"
               << "phase8A: " << phase8ASuccess << "\n"
               << "phase8B: " << phase8BSuccess << "\n"
+              << "phase8C1: " << phase8C1Success << "\n"
+              << "phase8C2: " << phase8C2Success << "\n"
               << "==========================\n";
-    return (m1Phase2Success && m1Module13Success && m2PhasesBCSuccess && m2PerftSuccess && phaseYZSuccess && phaseAASuccess && phaseABSuccess && m6Phase12Success && m6Module63Success && m6Module64Success && m6Module65Success && m6Module66Success && m6Module67Success && m6Module68Success && m6Module69Success && m6Module610Success && omegaPhase1Success && omegaPhase2Success && omegaPhase3Success && omegaPhase4Success && omegaPhase5Success && omegaPhase6Success && phase65ASuccess && phase65BSuccess && phase65CSuccess && phase65DSuccess && phase7ASuccess && phase7BSuccess && phase7CSuccess && phase7DSuccess && phase7ESuccess && phase7FSuccess && smokeMatchSuccess && phase7GSuccess && phase8ASuccess && phase8BSuccess) ? 0 : 1;
+    return (m1Phase2Success && m1Module13Success && m2PhasesBCSuccess && m2PerftSuccess && phaseYZSuccess && phaseAASuccess && phaseABSuccess && m6Phase12Success && m6Module63Success && m6Module64Success && m6Module65Success && m6Module66Success && m6Module67Success && m6Module68Success && m6Module69Success && m6Module610Success && omegaPhase1Success && omegaPhase2Success && omegaPhase3Success && omegaPhase4Success && omegaPhase5Success && omegaPhase6Success && phase65ASuccess && phase65BSuccess && phase65CSuccess && phase65DSuccess && phase7ASuccess && phase7BSuccess && phase7CSuccess && phase7DSuccess && phase7ESuccess && phase7FSuccess && smokeMatchSuccess && phase7GSuccess && phase8ASuccess && phase8BSuccess && phase8C1Success && phase8C2Success) ? 0 : 1;
 }

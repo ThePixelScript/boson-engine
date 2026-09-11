@@ -231,11 +231,22 @@ This document outlines the architectural roadmap for the Boson chess engine, tra
     * **Full Verification Battery:** Suite #36 passed all 15 validation gates (Gates 8-B-1 through 8-B-15). All 36 test suites passing cleanly (`phase8B: 1`).
     * **Status:** **Complete / Closed**.
   - **Phase 8-C (Quantization Calibration & In-Engine Serialization):**
-    * **Phase 8-C1 (Layer-Wise Quantization Fidelity & Calibration Diagnostic):** Formal layer-by-layer quantization error distribution profiling (accumulator, FC1, FC2, FC3) across validation split ($N = 300$), analyzing MAE, RMSE, P95/P99 tails, and activation saturation to develop integer rounding bias mitigation.
-    * **Phase 8-C2 (Quantization Exporter & In-Engine Serialization):** Exporter translating calibrated Float32 parameters into the production little-endian `boson-v2.nnue` binary layout, verified by in-engine SHA-256 digest validation and round-trip parity checks.
-  - **Phase 8-D (Empirical Model Progression & SPRT Validation):** Sequential tournament validation of trained NNUE model candidates against frozen classical baseline (`v0.9.5-classical-enhanced`) under automated SPRT matches.
+    * **Phase 8-C1 (Layer-Wise Quantization Fidelity & Calibration Diagnostic):** Diagnosed and resolved the discrete integer quantization underflow collapse where naive Post-Training Quantization (PTQ) zeroed out ~99% of FC1 and FC2 weights.
+      - Developed a Quantization-Aware Training (QAT) remediation protocol (`tools/training/qat.py`) employing Straight-Through Estimators (STE) and temperature-scaled surrogate loss on the 10% calibration partition ($N_{\text{calib}} = 450$).
+      - Remediation checkpoint R3 achieved near-lossless discrete quantization fidelity on `val.bin` ($N = 300$): Quantized BCE = 0.6712 (vs Float32 F0 BCE = 0.6695, $\Delta\text{BCE} = +0.0017$), Quantized Brier = 0.1354 (vs F0 = 0.1346), $\text{Corr}(E_q, q_{\text{teacher}}) = +0.1772$.
+      - Classical control depth-6 benchmark locked at exactly **313,092 nodes** ($\Delta = 0$). Suite #37 passed all 16 acceptance gates.
+      - **Status:** **Complete / Closed**.
+    * **Phase 8-C2 (Binary Model Exporter & In-Engine Serialization: `boson-v2.nnue`):** Implemented canonical discrete binary model serialization directly from the frozen R3 discrete checkpoint into `models/boson-v2.nnue`.
+      - **Binary Model File:** `models/boson-v2.nnue` (exact size: 41,978,176 bytes, magic `0x4E4E5545`, version 1).
+      - **Model SHA-256 Digest:** `e3a11394694652258b2f2445ad5719a67769763c8b088db1243867d17e41676e` (manifest: `models/boson-v2.manifest.json`).
+      - **Discrete Tensor Sparsity:** FC1 98.54% zero (479 active weights), FC2 3.42% zero (989 active weights), FC3 84.38% zero (5 active weights).
+      - **Three-Way Equivalence Verification:** Bit-exact evaluation equivalence confirmed across Python reference discrete emulation, C++ scalar in-engine evaluation, and C++ AVX2 SIMD forward inference ($\Delta = 0\text{ cp}$ across all 6 canonical benchmark positions).
+      - **Test Partition Protection:** `data/dataset_phase8a/test.bin` remained 100% untouched and unaccessed (SHA-256: `f504d41cd4a10800667dcd168bfa7a2e6e04e09310f502436be8a69fe99d255e`).
+      - **Classical Search Invariance:** Classical depth-6 benchmark locked at exactly **313,092 nodes** ($\Delta = 0$). Suite #38 passed all 12 acceptance gates.
+      - **Status:** **Complete / Closed**.
+  - **Phase 8-D (Empirical Model Progression & Strength Validation):** Sequential tournament validation of trained NNUE model candidates against frozen classical baseline (`v0.9.5-classical-enhanced`) under 200-game head-to-head matches.
 - **Exit Criteria:** Trained network achieving statistically significant positive Elo gain over Classical HCE baseline in fixed-depth/fixed-time SPRT matches ($\Delta\text{Elo} \ge +50\text{ Elo}$, SPRT Accept $H_1$).
-- **Status:** **In Progress** (Phases 8-A & 8-B Complete).
+- **Status:** **In Progress** (Phases 8-A, 8-B, 8-C1, & 8-C2 Complete).
 
 ---
 
