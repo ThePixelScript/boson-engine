@@ -307,4 +307,41 @@ PGN generation semantics remain standard: games begin from `startpos`, moves are
 - **Telemetry Reconciliation:** Telemetry naming/semantic defect: `opening.resultingFen` was previously reported under the ambiguous `startingFen` label. The actual game initialization remained `startpos`, followed by the approved opening move sequence.
 - **Disposition:** **PASS WITH REPORTING CORRECTION** (historical files `checkpoints/phase8f_v1_match_record.json` and `checkpoints/phase8f_v1_games.pgn` preserved as historical artifacts predating the naming correction).
 - **Interpretation:** V1 validates execution-context isolation, evaluator identity, thread ownership, sequential scheduling, game-boundary reset, within-game TT preservation, and runtime correctness. V1 does NOT establish NNUE strength superiority, Classical superiority, Elo delta, SPRT evidence, or strength ranking.
-- **Authority Boundary:** 100-game benchmark = **NOT AUTHORIZED**. Final frozen-state review required before 100-game authorization.
+- **Authority Boundary:** Phase 8-F V1 verified and closed. Execution of benchmark matches requires separate explicit authorization.
+
+### 9.4 Revised Phase 8-F Benchmark Protocol & Staged Paired Runner
+- **Authoritative Definition:** "Phase 8-F initial 40-game paired strength benchmark, with optional expansion to 100 games under the same frozen environment."
+- **Opening Schedule & Deterministic Selection:**
+  * Initial match: 20 opening pairs $\times 2$ color-reversed games = 40 total games.
+  * Canonical openings: `open_01` through `open_20` from the canonical 50-opening book in exact sequential order.
+  * Pairings per opening $i$:
+    - Game A ($2i$): Candidate-NNUE White vs Control-Classical Black
+    - Game B ($2i + 1$): Control-Classical White vs Candidate-NNUE Black
+  * Invariant: Both games within each pair share identical opening ID, opening move sequence, `gameInitialPosition` (`startpos`), and `searchStartFen`.
+- **40 $\to$ 100 Expansion Compatibility:**
+  * Configurable parameter `openingPairs` (default = 20 for initial 40 games; expandable to 50 for future 100 games).
+  * The initial 40 games form an exact deterministic prefix of the 100-game match (`open_01` through `open_50`), guaranteeing identical opening sequence and color pairings without separate implementations.
+  * Expansion to 100 games is strictly optional, non-automatic, and requires post-40-game review and explicit authorization.
+- **Frozen Runtime Conditions Across Stages:**
+  * Runtime baseline source: `231fd50343514c307249a0a9ab9d40de099bf362`
+  * Model: `models/boson-v2.nnue` (SHA: `ef3386104547109445a47257c85afd99beef3cadbf7766566244e76a040dae92`)
+  * Fixed depth: 6
+  * Search threads per engine: 1
+  * Hash size per engine: 16 MB
+  * Scheduler: Strictly sequential turn dispatch; zero concurrent searches.
+- **Purpose & Statistical Interpretation:**
+  * Practical baseline experiment;
+  * Not a precision Elo measurement;
+  * Not an SPRT;
+  * 40 games are not sufficient to establish a small Elo advantage/disadvantage;
+  * Output provides complete raw evidence for pairwise delta analysis ($d_i = \text{Score}_W + \text{Score}_B - 1$) and color-split breakdown without speculative significance claims.
+- **Telemetry Schema:**
+  Captures complete per-game telemetry: `gameNumber`, `openingPairIndex`, `openingId`, `openingMoveSequence`, `gameInitialPosition`, `searchStartFen`, `whiteWorker`, `blackWorker`, `whiteBackend`, `blackBackend`, `whiteModelSha`, `blackModelSha`, `depth`, `threads`, `hashMb`, `result`, `terminationReason`, `plyCount`, `completeMoveList`, `runtimeConfiguration`, and zero-error integrity statuses.
+- **Artifact Paths:**
+  * JSON match record: `checkpoints/phase8f_initial40_match_record.json`
+  * PGN match games: `checkpoints/phase8f_initial40_games.pgn`
+- **Execution Authority Status:**
+  * Runner implementation = **COMPLETE**
+  * Runner source-freeze commit = **PENDING**
+  * Initial 40-game benchmark execution = **NOT AUTHORIZED**
+  * 100-game benchmark execution = **NOT AUTHORIZED**

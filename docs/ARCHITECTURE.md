@@ -321,3 +321,9 @@ Boson's search core is strictly single-threaded per search invocation. Multi-eng
 - **Architectural Directive:**
   > *"Single-threaded search per engine; two persistent execution contexts used only for state isolation; searches are never concurrent."*
 - **Explicit Architectural Boundary:** Strategy A is strictly an infrastructure isolation mechanism for deterministic head-to-head matches. It is **not** Lazy SMP, and it is **not** parallel chess search. (Parallel search remains planned under Milestone 9).
+- **Phase 8-F Staged Benchmark Architecture:**
+  * Protocol: "Phase 8-F initial 40-game paired strength benchmark, with optional expansion to 100 games under the same frozen environment."
+  * Staged Runner: `runPhase8FStrengthBenchmark(size_t openingPairs)` with default `openingPairs = 20` (40 games) and expansion capability to `openingPairs = 50` (100 games).
+  * Deterministic Opening Selection: Strict selection of `open_01` through `open_20` with 2 color-reversed games per pair, forming an exact deterministic prefix of the future 50-pair protocol.
+  * Invariant Runtime Conditions: Fixed baseline commit `231fd50343514c307249a0a9ab9d40de099bf362`, model `models/boson-v2.nnue` (SHA: `ef3386104547109445a47257c85afd99beef3cadbf7766566244e76a040dae92`), fixed depth 6, 1 search thread, 16 MB hash, sequential turn execution across both initial and optional expanded stages.
+  * Authority Boundary: Benchmark execution is strictly unauthorized until explicit post-freeze review and authorization.

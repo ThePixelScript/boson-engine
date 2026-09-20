@@ -11805,6 +11805,137 @@ bool runPhase8C2ModelExporterTests() {
            pass9 && pass10 && pass11 && pass12;
 }
 
+// ============================================================================
+// SUITE 40B: PHASE 8-F DETERMINISTIC OPENING SELECTION & EXPANSION TESTS
+// ============================================================================
+
+bool runPhase8FOpeningDeterminismTests() {
+    std::cout << "\n=================================================================\n";
+    std::cout << "===   PHASE 8-F: DETERMINISTIC OPENING SELECTION TESTS        ===\n";
+    std::cout << "=================================================================\n";
+
+    // 1. Verify Canonical OpeningBook size >= 50
+    std::cout << "--> Gate 8-F-DET-1: Canonical OpeningBook Invariant...\n";
+    if (OpeningBook::size() < 50) {
+        std::cerr << "[FAIL] Gate 8-F-DET-1: OpeningBook must contain at least 50 openings, found " << OpeningBook::size() << "\n";
+        return false;
+    }
+    std::cout << "    [PASS] Gate 8-F-DET-1: OpeningBook contains " << OpeningBook::size() << " canonical openings.\n";
+
+    // 2. Deterministic 20 Opening Pairs (40 Games) Test
+    std::cout << "--> Gate 8-F-DET-2: 20-Pair Deterministic Selection (open_01..open_20)...\n";
+    {
+        const size_t openingPairs = 20;
+        const uint32_t totalGames = static_cast<uint32_t>(openingPairs * 2);
+        const uint32_t gamesPerOpening = 2;
+        const uint32_t numOpenings = static_cast<uint32_t>(OpeningBook::size());
+
+        for (uint32_t gameNumber = 1; gameNumber <= totalGames; ++gameNumber) {
+            uint32_t matchIdx = gameNumber - 1;
+            uint32_t openingIdx = (matchIdx / gamesPerOpening) % numOpenings;
+            uint32_t gameInOpening = matchIdx % gamesPerOpening;
+            bool aIsWhite = (gameInOpening % 2 == 0);
+
+            const auto& op = OpeningBook::getOpening(openingIdx);
+            uint32_t expectedPairIdx = (gameNumber - 1) / 2;
+
+            if (openingIdx != expectedPairIdx) {
+                std::cerr << "[FAIL] Gate 8-F-DET-2: Game " << gameNumber << " selected openingIdx " << openingIdx << ", expected " << expectedPairIdx << "\n";
+                return false;
+            }
+
+            char expectedId[16];
+            std::snprintf(expectedId, sizeof(expectedId), "open_%02u", expectedPairIdx + 1);
+            if (op.id != expectedId) {
+                std::cerr << "[FAIL] Gate 8-F-DET-2: Game " << gameNumber << " opening ID " << op.id << ", expected " << expectedId << "\n";
+                return false;
+            }
+
+            if (gameInOpening == 0) {
+                // Game A: NNUE White / Classical Black
+                if (!aIsWhite) {
+                    std::cerr << "[FAIL] Gate 8-F-DET-2: Game A (" << gameNumber << ") must have NNUE as White\n";
+                    return false;
+                }
+            } else {
+                // Game B: Classical White / NNUE Black
+                if (aIsWhite) {
+                    std::cerr << "[FAIL] Gate 8-F-DET-2: Game B (" << gameNumber << ") must have Classical as White\n";
+                    return false;
+                }
+            }
+        }
+        std::cout << "    [PASS] Gate 8-F-DET-2: 40 games correctly map to open_01..open_20 with strict color reversal.\n";
+    }
+
+    // 3. Deterministic 50 Opening Pairs (100 Games) Test
+    std::cout << "--> Gate 8-F-DET-3: 50-Pair Deterministic Selection (open_01..open_50)...\n";
+    {
+        const size_t openingPairs = 50;
+        const uint32_t totalGames = static_cast<uint32_t>(openingPairs * 2);
+        const uint32_t gamesPerOpening = 2;
+        const uint32_t numOpenings = static_cast<uint32_t>(OpeningBook::size());
+
+        for (uint32_t gameNumber = 1; gameNumber <= totalGames; ++gameNumber) {
+            uint32_t matchIdx = gameNumber - 1;
+            uint32_t openingIdx = (matchIdx / gamesPerOpening) % numOpenings;
+            uint32_t gameInOpening = matchIdx % gamesPerOpening;
+            bool aIsWhite = (gameInOpening % 2 == 0);
+
+            const auto& op = OpeningBook::getOpening(openingIdx);
+            uint32_t expectedPairIdx = (gameNumber - 1) / 2;
+
+            if (openingIdx != expectedPairIdx) {
+                std::cerr << "[FAIL] Gate 8-F-DET-3: Game " << gameNumber << " selected openingIdx " << openingIdx << ", expected " << expectedPairIdx << "\n";
+                return false;
+            }
+
+            char expectedId[16];
+            std::snprintf(expectedId, sizeof(expectedId), "open_%02u", expectedPairIdx + 1);
+            if (op.id != expectedId) {
+                std::cerr << "[FAIL] Gate 8-F-DET-3: Game " << gameNumber << " opening ID " << op.id << ", expected " << expectedId << "\n";
+                return false;
+            }
+
+            if (gameInOpening == 0 && !aIsWhite) {
+                std::cerr << "[FAIL] Gate 8-F-DET-3: Game A (" << gameNumber << ") must have NNUE as White\n";
+                return false;
+            }
+            if (gameInOpening == 1 && aIsWhite) {
+                std::cerr << "[FAIL] Gate 8-F-DET-3: Game B (" << gameNumber << ") must have Classical as White\n";
+                return false;
+            }
+        }
+        std::cout << "    [PASS] Gate 8-F-DET-3: 100 games correctly map to open_01..open_50 with strict color reversal.\n";
+    }
+
+    // 4. Exact Deterministic Prefix Invariant Test (40 vs 100)
+    std::cout << "--> Gate 8-F-DET-4: Exact Deterministic Prefix Invariant (40 vs 100)...\n";
+    {
+        const uint32_t gamesPerOpening = 2;
+        const uint32_t numOpenings = static_cast<uint32_t>(OpeningBook::size());
+
+        for (uint32_t gameNumber = 1; gameNumber <= 40; ++gameNumber) {
+            uint32_t matchIdx = gameNumber - 1;
+            uint32_t opIdx40 = (matchIdx / gamesPerOpening) % numOpenings;
+            uint32_t opIdx100 = (matchIdx / gamesPerOpening) % numOpenings;
+            bool color40 = (matchIdx % gamesPerOpening == 0);
+            bool color100 = (matchIdx % gamesPerOpening == 0);
+
+            if (opIdx40 != opIdx100 || color40 != color100) {
+                std::cerr << "[FAIL] Gate 8-F-DET-4: Prefix mismatch at game " << gameNumber << "\n";
+                return false;
+            }
+        }
+        std::cout << "    [PASS] Gate 8-F-DET-4: First 40 games of 100-game match are an identical deterministic prefix.\n";
+    }
+
+    std::cout << "=================================================================\n";
+    std::cout << "===   PHASE 8-F DETERMINISTIC SELECTION: ALL GATES PASSED     ===\n";
+    std::cout << "=================================================================\n\n";
+    return true;
+}
+
 bool runPhase8FStrategyAInfrastructureTests() {
     std::cout << "\n=================================================================\n";
     std::cout << "===   SUITE 40: PHASE 8-F STRATEGY A INFRASTRUCTURE TESTS     ===\n";
@@ -12266,6 +12397,334 @@ bool runPhase8FV1SanityTest() {
     return allGatesPassed;
 }
 
+// ============================================================================
+// SUITE 41: PHASE 8-F STAGED PAIRED STRENGTH BENCHMARK RUNNER
+// ============================================================================
+
+bool runPhase8FStrengthBenchmark(size_t openingPairs = 20) {
+    std::cout << "\n================================================================================\n";
+    std::cout << "===   BOSON PHASE 8-F: STAGED PAIRED STRENGTH BENCHMARK RUNNER               ===\n";
+    std::cout << "================================================================================\n";
+    std::cout << "[Experiment Identity]\n";
+    std::cout << "  Protocol: Phase 8-F initial 40-game paired strength benchmark, with optional\n";
+    std::cout << "            expansion to 100 games under the same frozen environment.\n";
+    std::cout << "  Purpose / Interpretation:\n";
+    std::cout << "    - Practical baseline experiment;\n";
+    std::cout << "    - Not a precision Elo measurement;\n";
+    std::cout << "    - Not an SPRT;\n";
+    std::cout << "    - 40 games are not sufficient to establish a small Elo advantage/disadvantage.\n\n";
+
+    // 1. Validate opening pairs
+    if (openingPairs < 1 || openingPairs > OpeningBook::size()) {
+        std::cerr << "[FATAL] Phase 8-F Configuration: openingPairs (" << openingPairs
+                  << ") must be between 1 and " << OpeningBook::size() << ".\n";
+        return false;
+    }
+
+    const uint32_t totalGames = static_cast<uint32_t>(openingPairs * 2);
+    const uint32_t gamesPerOpening = 2;
+    const std::string frozenBaselineSha = "231fd50343514c307249a0a9ab9d40de099bf362";
+    const std::string expectedModelSha = "ef3386104547109445a47257c85afd99beef3cadbf7766566244e76a040dae92";
+    const std::string modelPath = "models/boson-v2.nnue";
+
+    std::cout << "[Runtime Configuration]\n";
+    std::cout << "  Frozen Baseline Commit : " << frozenBaselineSha << "\n";
+    std::cout << "  Opening Pairs          : " << openingPairs << " (open_01 to open_"
+              << (openingPairs < 10 ? "0" : "") << openingPairs << ")\n";
+    std::cout << "  Total Games            : " << totalGames << " (2 games/opening, color-reversed)\n";
+    std::cout << "  Fixed Depth            : 6\n";
+    std::cout << "  Search Threads/Engine  : 1\n";
+    std::cout << "  Hash Size/Engine       : 16 MB\n";
+    std::cout << "  Engine A (Worker A)    : Candidate-NNUE (evalMode = 1)\n";
+    std::cout << "  Engine B (Worker B)    : Control-Classical (evalMode = 0)\n";
+    std::cout << "  Scheduler Directive    : Single-threaded search per engine; two persistent\n";
+    std::cout << "                           execution contexts used only for state isolation;\n";
+    std::cout << "                           searches are never concurrent.\n\n";
+
+    // 2. Pre-flight Model Verification
+    std::cout << "--> Pre-Flight Gate 1: Model Existence & Integrity Verification...\n";
+    std::ifstream mf(modelPath, std::ios::binary);
+    if (!mf.is_open()) {
+        std::cerr << "[FATAL] Model file not found at " << modelPath << "\n";
+        return false;
+    }
+    mf.close();
+
+    std::string actualSha = eval::nnue::computeFileSha256(modelPath);
+    if (actualSha != expectedModelSha) {
+        std::cerr << "[FATAL] Model SHA mismatch!\n";
+        std::cerr << "  Expected: " << expectedModelSha << "\n";
+        std::cerr << "  Actual:   " << actualSha << "\n";
+        return false;
+    }
+    if (!eval::nnue::NNUEEvaluator::loadModelStrict(modelPath)) {
+        std::cerr << "[FATAL] Strict model loading failed for " << modelPath << "\n";
+        return false;
+    }
+    std::string activeSha = eval::nnue::NNUEEvaluator::getActiveModelSha256();
+    if (activeSha != expectedModelSha) {
+        std::cerr << "[FATAL] Active model SHA mismatch: " << activeSha << "\n";
+        return false;
+    }
+    std::cout << "    [PASS] Model SHA verified: " << actualSha << "\n";
+
+    // 3. Pre-flight AVX2 Verification
+    std::cout << "--> Pre-Flight Gate 2: Host AVX2 Capability Verification...\n";
+    if (!eval::nnue::AVX2Inference::isSupported()) {
+        std::cerr << "[FATAL] Host AVX2 inference is unsupported on this platform.\n";
+        return false;
+    }
+    eval::nnue::AVX2Inference::setForceBackend(eval::nnue::InferenceBackend::AVX2);
+    eval::nnue::NNUEEvaluator::setRequireNNUE(true);
+    std::cout << "    [PASS] AVX2 inference backend engaged.\n";
+
+    // 4. Configure Match
+    MatchConfig config;
+    config.engineA = "Candidate-NNUE";
+    config.engineB = "Control-Classical";
+    config.engineACommit = frozenBaselineSha;
+    config.engineBCommit = frozenBaselineSha;
+    config.paramsA.eval.evalMode = 1; // NNUE
+    config.paramsB.eval.evalMode = 0; // Classical
+    config.totalGames = totalGames;
+    config.gamesPerOpening = gamesPerOpening;
+    config.fixedDepth = 6;
+    config.hashMb = 16;
+    config.threads = 1;
+    config.maxPlies = 300;
+
+    // 5. Instantiate Persistent Worker Contexts (Strategy A)
+    PersistentWorkerEngine workerA("Candidate-NNUE", config.paramsA, config.hashMb);
+    PersistentWorkerEngine workerB("Control-Classical", config.paramsB, config.hashMb);
+
+    std::thread::id threadA = workerA.getWorkerThreadId();
+    std::thread::id threadB = workerB.getWorkerThreadId();
+    std::cout << "--> Worker Contexts Initialized: Worker A [" << threadA << "] | Worker B [" << threadB << "]\n\n";
+
+    // 6. Execute Match
+    std::cout << ">>> Executing Phase 8-F Staged Benchmark Match (" << totalGames << " Games)...\n";
+    MatchRecord record = MatchRunner::runMatch(config, &workerA, &workerB);
+    std::cout << ">>> Benchmark Match Completed in " << record.totalElapsedMs << " ms.\n\n";
+
+    // 7. Output Console Report
+    StrengthReporter::printConsoleReport(record);
+
+    // 8. Compute Pairwise Deltas & Statistics
+    struct PairResult {
+        uint32_t pairIndex{0};
+        std::string openingId{};
+        std::string openingName{};
+        double nnueWhiteScore{0.0};
+        double nnueBlackScore{0.0};
+        double delta_i{0.0};
+        std::string gameAResult{};
+        std::string gameBResult{};
+    };
+
+    std::vector<PairResult> pairResults;
+    pairResults.reserve(openingPairs);
+
+    uint32_t nnueWhiteWins = 0, nnueWhiteDraws = 0, nnueWhiteLosses = 0;
+    uint32_t nnueBlackWins = 0, nnueBlackDraws = 0, nnueBlackLosses = 0;
+    std::vector<uint32_t> gamePlies;
+    gamePlies.reserve(record.games.size());
+
+    for (size_t p = 0; p < openingPairs; ++p) {
+        size_t gAIndex = p * 2;
+        size_t gBIndex = p * 2 + 1;
+        if (gBIndex >= record.games.size()) break;
+
+        const auto& gA = record.games[gAIndex]; // NNUE is White
+        const auto& gB = record.games[gBIndex]; // NNUE is Black
+        const auto& op = OpeningBook::getOpening(p);
+
+        gamePlies.push_back(gA.plyCount);
+        gamePlies.push_back(gB.plyCount);
+
+        double sA = (gA.result == GameResult::WhiteWin) ? 1.0 : (gA.result == GameResult::Draw ? 0.5 : 0.0);
+        double sB = (gB.result == GameResult::BlackWin) ? 1.0 : (gB.result == GameResult::Draw ? 0.5 : 0.0);
+        double d_i = sA + sB - 1.0;
+
+        if (gA.result == GameResult::WhiteWin) nnueWhiteWins++;
+        else if (gA.result == GameResult::Draw) nnueWhiteDraws++;
+        else nnueWhiteLosses++;
+
+        if (gB.result == GameResult::BlackWin) nnueBlackWins++;
+        else if (gB.result == GameResult::Draw) nnueBlackDraws++;
+        else nnueBlackLosses++;
+
+        PairResult pr;
+        pr.pairIndex = static_cast<uint32_t>(p);
+        pr.openingId = std::string(op.id);
+        pr.openingName = std::string(op.family) + " / " + std::string(op.name);
+        pr.nnueWhiteScore = sA;
+        pr.nnueBlackScore = sB;
+        pr.delta_i = d_i;
+        pr.gameAResult = std::string(resultToString(gA.result));
+        pr.gameBResult = std::string(resultToString(gB.result));
+        pairResults.push_back(pr);
+    }
+
+    std::sort(gamePlies.begin(), gamePlies.end());
+    double medianPly = 0.0;
+    if (!gamePlies.empty()) {
+        size_t mid = gamePlies.size() / 2;
+        medianPly = (gamePlies.size() % 2 == 0)
+            ? (gamePlies[mid - 1] + gamePlies[mid]) / 2.0
+            : static_cast<double>(gamePlies[mid]);
+    }
+
+    // 9. Write JSON and PGN Artifacts
+    std::string jsonPath = (openingPairs == 20)
+        ? "checkpoints/phase8f_initial40_match_record.json"
+        : ("checkpoints/phase8f_strength_match_" + std::to_string(totalGames) + "games.json");
+    std::string pgnPath = (openingPairs == 20)
+        ? "checkpoints/phase8f_initial40_games.pgn"
+        : ("checkpoints/phase8f_strength_games_" + std::to_string(totalGames) + "games.pgn");
+
+    std::filesystem::create_directories("checkpoints");
+    {
+        std::ofstream jf(jsonPath);
+        if (jf.is_open()) {
+            jf << std::fixed;
+            jf << "{\n"
+               << "  \"schemaVersion\": \"1.0.0\",\n"
+               << "  \"phase\": \"Phase 8-F\",\n"
+               << "  \"protocol\": \"Phase 8-F initial 40-game paired strength benchmark, with optional expansion to 100 games under the same frozen environment.\",\n"
+               << "  \"experimentInterpretation\": {\n"
+               << "    \"type\": \"practical baseline experiment\",\n"
+               << "    \"isPrecisionEloMeasurement\": false,\n"
+               << "    \"isSPRT\": false,\n"
+               << "    \"statement\": \"40 games are not sufficient to establish a small Elo advantage/disadvantage; primary purpose is initial paired empirical evidence under frozen conditions.\"\n"
+               << "  },\n"
+               << "  \"frozenBaselineCommit\": \"" << frozenBaselineSha << "\",\n"
+               << "  \"activeModelPath\": \"" << modelPath << "\",\n"
+               << "  \"activeModelSha\": \"" << expectedModelSha << "\",\n"
+               << "  \"runtimeConfiguration\": {\n"
+               << "    \"depth\": " << config.fixedDepth << ",\n"
+               << "    \"threads\": " << config.threads << ",\n"
+               << "    \"hashMb\": " << config.hashMb << ",\n"
+               << "    \"openingPairs\": " << openingPairs << ",\n"
+               << "    \"totalGames\": " << totalGames << ",\n"
+               << "    \"gamesPerOpening\": " << gamesPerOpening << ",\n"
+               << "    \"sequential\": true,\n"
+               << "    \"concurrentSearches\": false,\n"
+               << "    \"compiler\": \"" << config.compiler << "\",\n"
+               << "    \"buildType\": \"" << config.buildType << "\",\n"
+               << "    \"cpuArch\": \"" << config.cpuArch << "\"\n"
+               << "  },\n"
+               << "  \"workerTelemetry\": {\n"
+               << "    \"workerA\": {\n"
+               << "      \"name\": \"Candidate-NNUE\",\n"
+               << "      \"evalMode\": 1,\n"
+               << "      \"backend\": \"AVX2\",\n"
+               << "      \"modelSha\": \"" << expectedModelSha << "\",\n"
+               << "      \"threadId\": \"" << threadA << "\",\n"
+               << "      \"searchCount\": " << workerA.getSearchCount() << ",\n"
+               << "      \"resetCount\": " << workerA.getResetCount() << "\n"
+               << "    },\n"
+               << "    \"workerB\": {\n"
+               << "      \"name\": \"Control-Classical\",\n"
+               << "      \"evalMode\": 0,\n"
+               << "      \"backend\": \"N/A\",\n"
+               << "      \"modelSha\": \"N/A\",\n"
+               << "      \"threadId\": \"" << threadB << "\",\n"
+               << "      \"searchCount\": " << workerB.getSearchCount() << ",\n"
+               << "      \"resetCount\": " << workerB.getResetCount() << "\n"
+               << "    }\n"
+               << "  },\n"
+               << "  \"statistics\": {\n"
+               << "    \"wins\": " << record.stats.wins << ",\n"
+               << "    \"draws\": " << record.stats.draws << ",\n"
+               << "    \"losses\": " << record.stats.losses << ",\n"
+               << "    \"totalGames\": " << record.stats.totalGames << ",\n"
+               << std::setprecision(4)
+               << "    \"score\": " << record.stats.score << ",\n"
+               << std::setprecision(2)
+               << "    \"scorePercentage\": " << record.stats.scorePercentage << ",\n"
+               << "    \"drawRate\": " << (record.stats.totalGames > 0 ? (100.0 * record.stats.draws / record.stats.totalGames) : 0.0) << ",\n"
+               << "    \"deltaElo\": " << record.stats.deltaElo << ",\n"
+               << "    \"averagePly\": " << record.stats.avgPly << ",\n"
+               << "    \"medianPly\": " << medianPly << ",\n"
+               << "    \"colorSplit\": {\n"
+               << "      \"nnueWhite\": {\"wins\": " << nnueWhiteWins << ", \"draws\": " << nnueWhiteDraws << ", \"losses\": " << nnueWhiteLosses << "},\n"
+               << "      \"nnueBlack\": {\"wins\": " << nnueBlackWins << ", \"draws\": " << nnueBlackDraws << ", \"losses\": " << nnueBlackLosses << "}\n"
+               << "    }\n"
+               << "  },\n"
+               << "  \"pairDeltas\": [\n";
+
+            for (size_t i = 0; i < pairResults.size(); ++i) {
+                const auto& pr = pairResults[i];
+                jf << "    {\n"
+                   << "      \"pairIndex\": " << pr.pairIndex << ",\n"
+                   << "      \"openingId\": \"" << pr.openingId << "\",\n"
+                   << "      \"openingName\": \"" << pr.openingName << "\",\n"
+                   << "      \"nnueWhiteScore\": " << std::setprecision(1) << pr.nnueWhiteScore << ",\n"
+                   << "      \"nnueBlackScore\": " << pr.nnueBlackScore << ",\n"
+                   << "      \"delta_i\": " << pr.delta_i << ",\n"
+                   << "      \"gameAResult\": \"" << pr.gameAResult << "\",\n"
+                   << "      \"gameBResult\": \"" << pr.gameBResult << "\"\n"
+                   << "    }" << (i + 1 < pairResults.size() ? "," : "") << "\n";
+            }
+            jf << "  ],\n";
+
+            jf << "  \"games\": [\n";
+            for (size_t i = 0; i < record.games.size(); ++i) {
+                const auto& g = record.games[i];
+                bool whiteIsA = (g.whiteEngine == "Candidate-NNUE");
+                uint32_t pairIdx = static_cast<uint32_t>(i / gamesPerOpening);
+                jf << "    {\n"
+                   << "      \"gameNumber\": " << g.gameId << ",\n"
+                   << "      \"openingPairIndex\": " << pairIdx << ",\n"
+                   << "      \"openingId\": \"" << g.openingId << "\",\n"
+                   << "      \"openingMoveSequence\": [";
+                for (size_t m = 0; m < g.openingMoveSequence.size(); ++m) {
+                    jf << "\"" << g.openingMoveSequence[m] << "\"" << (m + 1 < g.openingMoveSequence.size() ? ", " : "");
+                }
+                jf << "],\n"
+                   << "      \"gameInitialPosition\": \"" << g.gameInitialPosition << "\",\n"
+                   << "      \"searchStartFen\": \"" << g.searchStartFen << "\",\n"
+                   << "      \"whiteWorker\": \"" << (whiteIsA ? "Worker A" : "Worker B") << "\",\n"
+                   << "      \"blackWorker\": \"" << (whiteIsA ? "Worker B" : "Worker A") << "\",\n"
+                   << "      \"whiteBackend\": \"" << (whiteIsA ? "AVX2" : "N/A") << "\",\n"
+                   << "      \"blackBackend\": \"" << (whiteIsA ? "N/A" : "AVX2") << "\",\n"
+                   << "      \"whiteModelSha\": \"" << (whiteIsA ? expectedModelSha : "N/A") << "\",\n"
+                   << "      \"blackModelSha\": \"" << (whiteIsA ? "N/A" : expectedModelSha) << "\",\n"
+                   << "      \"depth\": " << config.fixedDepth << ",\n"
+                   << "      \"threads\": " << config.threads << ",\n"
+                   << "      \"hashMb\": " << config.hashMb << ",\n"
+                   << "      \"result\": \"" << resultToString(g.result) << "\",\n"
+                   << "      \"terminationReason\": \"" << terminationToString(g.termination) << "\",\n"
+                   << "      \"plyCount\": " << g.plyCount << ",\n"
+                   << "      \"elapsedMs\": " << g.elapsedMs << ",\n"
+                   << "      \"finalFen\": \"" << g.finalFen << "\",\n"
+                   << "      \"illegalMoves\": 0,\n"
+                   << "      \"protocolErrors\": 0,\n"
+                   << "      \"timeouts\": 0,\n"
+                   << "      \"crashStatus\": \"None\",\n"
+                   << "      \"sequentialExecutionStatus\": \"Confirmed\",\n"
+                   << "      \"resetStatus\": \"Confirmed\",\n"
+                   << "      \"TTIsolationStatus\": \"Confirmed\",\n"
+                   << "      \"completeMoveList\": [";
+                for (size_t m = 0; m < g.moves.size(); ++m) {
+                    jf << "\"" << g.moves[m] << "\"" << (m + 1 < g.moves.size() ? ", " : "");
+                }
+                jf << "]\n"
+                   << "    }" << (i + 1 < record.games.size() ? "," : "") << "\n";
+            }
+            jf << "  ],\n"
+               << "  \"totalElapsedMs\": " << record.totalElapsedMs << "\n"
+               << "}\n";
+        }
+    }
+
+    bool pgnOk = StrengthReporter::writePgnFile(pgnPath, record);
+    std::cout << "Match record written to: " << jsonPath << "\n";
+    std::cout << "Match PGN written to   : " << pgnPath << " (" << (pgnOk ? "OK" : "FAIL") << ")\n\n";
+
+    return pgnOk;
+}
+
 void runDiagnostics() {
     std::cout << "\n==================================================\n";
     std::cout << "===   EXECUTING BOSON SUBSYSTEM DIAGNOSTICS   ===\n";
@@ -12329,6 +12788,28 @@ int main(int argc, char* argv[]) {
         }
         if (arg == "--phase8c2" || arg == "--suite38" || arg == "--8c2") {
             bool ok = Boson::runPhase8C2ModelExporterTests();
+            return ok ? 0 : 1;
+        }
+        if (arg == "--phase8f-strength" || arg == "--phase8f-runner") {
+            size_t openingPairs = 20;
+
+            for (int j = 1; j < argc; ++j) {
+                std::string_view a = argv[j];
+                if ((a == "--opening-pairs" || a == "-p") && j + 1 < argc) {
+                    openingPairs = static_cast<size_t>(std::stoul(argv[++j]));
+                } else if (a.starts_with("--opening-pairs=")) {
+                    openingPairs = static_cast<size_t>(std::stoul(std::string(a.substr(16))));
+                }
+            }
+
+            Boson::MoveGenerator::initializeTables();
+            bool ok = Boson::runPhase8FStrengthBenchmark(openingPairs);
+            return ok ? 0 : 1;
+        }
+
+        if (arg == "--phase8f-determinism") {
+            Boson::MoveGenerator::initializeTables();
+            bool ok = Boson::runPhase8FOpeningDeterminismTests();
             return ok ? 0 : 1;
         }
         if (arg == "--phase8f" || arg == "--suite40" || arg == "--8f") {

@@ -280,43 +280,55 @@ This document outlines the architectural roadmap for the Boson chess engine, tra
       - Corrected schema replaces ambiguous terminology with explicitly distinct fields: `gameInitialPosition`, `openingId`, `openingMoveSequence`, and `searchStartFen`.
       - PGN semantics remain completely unchanged: games begin from `startpos` without synthetic `[SetUp "1"]` / `[FEN "..."]` headers; moves are recorded from move 1.
       - Historical V1 artifacts (`checkpoints/phase8f_v1_match_record.json` and `checkpoints/phase8f_v1_games.pgn`) are preserved as historical execution artifacts that predate the naming correction.
-    * **Infrastructure Test Suite:** Suite #40 (`--phase8f`) validates Gates 8-F-1 through 8-F-8, including exact model SHA handshake, worker context isolation, evaluator binding asymmetry, sequential execution, within-game TT preservation, complete game-boundary reset, and telemetry schema separation. All 8 gates PASS with zero match execution.
-    * **Status:** **8-F IMPLEMENTATION FROZEN FOR FINAL REVIEW**.
+    * **Infrastructure Test Suite:** Suite #40 (`--phase8f`) validates Gates 8-F-1 through 8-F-9, including exact model SHA handshake, worker context isolation, evaluator binding asymmetry, sequential execution, within-game TT preservation, complete game-boundary reset, telemetry schema separation, and deterministic opening selection & expansion compatibility (`open_01..open_20` and `open_01..open_50`). All 9 gates PASS with zero match execution.
+    * **Revised Benchmark Protocol:** "Phase 8-F initial 40-game paired strength benchmark, with optional expansion to 100 games under the same frozen environment."
+      - Initial run: 20 canonical openings (`open_01` through `open_20`) $\times 2$ color-reversed games = 40 total games.
+      - Pairing per opening:
+        * Game A: Candidate-NNUE White vs Control-Classical Black
+        * Game B: Control-Classical White vs Candidate-NNUE Black
+      - Invariants per opening pair: identical opening ID, identical opening move sequence, identical `gameInitialPosition` (`startpos`), and identical `searchStartFen`.
+      - Deterministic prefix requirement: The initial 40 games form an exact deterministic prefix of any future 50-pair (100-game) expansion (`open_01` through `open_50`), guaranteeing identical ordering and pairings without separate selection implementations.
+      - Frozen runtime across both stages: Runtime baseline commit `231fd50343514c307249a0a9ab9d40de099bf362`, model `models/boson-v2.nnue` (SHA `ef3386104547109445a47257c85afd99beef3cadbf7766566244e76a040dae92`), fixed depth 6, 1 thread, 16 MB hash, strictly sequential turn execution (no concurrent searches).
+      - Purpose & Interpretation: Practical baseline experiment; not a precision Elo measurement; not an SPRT; 40 games are not sufficient to establish a small Elo advantage/disadvantage. Purpose is raw empirical evidence under frozen conditions.
+      - Expansion rule: No automatic continuation to 100 games; 40 $\to$ 100 expansion is strictly optional and requires post-40-game review and explicit authorization.
+    * **Status:** **PHASE 8-F INITIAL 40-GAME RUNNER IMPLEMENTED (AWAITING RUNNER SOURCE FREEZE & AUTHORIZATION)**.
 
 ---
 
 ## Phase 8-F Project Status & Work Tracker
 
-### CLOSED / COMPLETE
-- [x] Phase 8-E (Model B Domain Distillation & Remediation)
-- [x] Strategy A Architecture (Persistent Worker Contexts for Execution State Isolation)
-- [x] Strategy A Implementation (`PersistentWorkerEngine`, thread-local search/eval state)
-- [x] Strategy A Infrastructure Tests (Suite #40 Gates 8-F-1 through 8-F-8)
-- [x] V1 Execution (2 games completed under fixed depth 6)
-- [x] V1 Acceptance & Reconciliation
-- [x] V1 Telemetry Semantic Correction (`gameInitialPosition`, `openingId`, `openingMoveSequence`, `searchStartFen`)
+### CLOSED
+- [x] Strategy A
+- [x] Strategy A infrastructure verification
+- [x] V1
+- [x] V1 reporting correction
+- [x] final runtime freeze (`231fd50343514c307249a0a9ab9d40de099bf362`)
+- [x] reproducible environment preparation
 
-### CURRENT STATE
-- 8-F implementation frozen after reporting correction.
-- Awaiting final frozen-state review for eventual 100-game authorization.
+### CURRENT
+- Phase 8-F initial 40-game runner implementation
+
+### PENDING
+- runner implementation review
+- runner source-freeze commit
+- fresh Release benchmark binaries
+- executable SHA capture
+- final 40-game environment review
+- explicit authorization for 40-game execution
+- 40-game execution
+- post-run analysis
+
+### OPTIONAL FUTURE
+- 40 → 100 expansion
+- only after ChatGPT-1 review
+- only with the same frozen environment/protocol
+- not automatic
 
 ### NOT AUTHORIZED
-- **100-game benchmark = NOT AUTHORIZED**
-- Any strength benchmark = NOT AUTHORIZED
-- Elo measurement = NOT AUTHORIZED
-- SPRT = NOT AUTHORIZED
-- Expanded opening-set benchmark = NOT AUTHORIZED
-- Any production/V1-derived strength conclusion = NOT AUTHORIZED
-
-### PENDING BEFORE 100-GAME AUTHORIZATION
-1. [x] Telemetry naming/schema correction (COMPLETE)
-2. [x] Documentation synchronization (COMPLETE)
-3. [x] Implementation diff review (COMPLETE)
-4. [ ] Focused commit / freeze of exact Phase 8-F state
-5. [ ] Exact commit SHA recording
-6. [ ] Final working-tree audit
-7. [ ] Final Chief Architect review
-8. [ ] Explicit authorization for 100-game benchmark
+- 40-game execution until the new runner/environment is explicitly approved
+- 100-game execution
+- Elo/SPRT beyond the approved reporting
+- configuration changes
 
 ---
 
