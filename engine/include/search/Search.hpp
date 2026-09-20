@@ -20,7 +20,7 @@ public:
     static void divide(Position& pos, int depth) noexcept;
     static int runSearch(Position& pos, int maxDepth) noexcept;
     static int runSearch(Position& pos, const SearchLimits& limits) noexcept;
-    static TranspositionTable s_tt;
+    static thread_local TranspositionTable s_tt;
     
     static constexpr int INF = 32000;
     static constexpr int MATE = 31000;
@@ -50,6 +50,14 @@ public:
     [[nodiscard]] static const ContinuationHistoryTable& getContHist() noexcept { return s_chTable; }
     [[nodiscard]] static ContinuationHistoryTable& getMutableContHist() noexcept { return s_chTable; }
     static void clearContHist() noexcept { s_chTable.clear(); }
+    static void resizeTT(size_t megaBytes) noexcept { s_tt.resize(megaBytes); }
+    static void clearKillerMoves() noexcept {
+        for (auto& row : s_killerMoves) row.fill(Move());
+    }
+    static void clearHistory() noexcept {
+        for (auto& row : s_historyTable) row.fill(0);
+    }
+    static void clearAllSearchState() noexcept;
     [[nodiscard]] static const PVLine& getLastPV() noexcept {
         return SearchController::getInstance().getStats().pvLine;
     }
@@ -65,15 +73,15 @@ public:
     [[nodiscard]] static eval::IEvaluator& getDefaultNNUEEvaluator() noexcept;
     [[nodiscard]] static eval::ClassicalEvaluator& getDefaultClassicalEvaluator() noexcept { return m_defaultEvaluator; }
 
-    static eval::ClassicalEvaluator m_defaultEvaluator;
-    static eval::IEvaluator* m_evaluator;
+    static thread_local eval::ClassicalEvaluator m_defaultEvaluator;
+    static thread_local eval::IEvaluator* m_evaluator;
 
     struct StackEntry {
         int staticEval = 0;
         bool inCheck = false;
     };
 
-    static std::array<StackEntry, 128> s_searchStack;
+    static thread_local std::array<StackEntry, 128> s_searchStack;
     static void clearStack() noexcept { s_searchStack.fill(StackEntry{}); }
     [[nodiscard]] static std::array<StackEntry, 128>& getStack() noexcept { return s_searchStack; }
 
@@ -98,10 +106,10 @@ public:
     }
 
 private:
-    static CounterMoveTable s_cmTable;
-    static ContinuationHistoryTable s_chTable; // Managed memory layer
-    static std::array<std::array<Move, 2>, 64> s_killerMoves;
-    static std::array<std::array<uint32_t, 64>, 12> s_historyTable;
+    static thread_local CounterMoveTable s_cmTable;
+    static thread_local ContinuationHistoryTable s_chTable; // Managed memory layer
+    static thread_local std::array<std::array<Move, 2>, 64> s_killerMoves;
+    static thread_local std::array<std::array<uint32_t, 64>, 12> s_historyTable;
 };
 
 } // namespace Boson

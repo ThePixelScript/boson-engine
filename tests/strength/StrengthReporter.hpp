@@ -12,6 +12,7 @@ public:
     static void printConsoleReport(const MatchRecord& record, std::ostream& out = std::cout);
     static std::string serializeJson(const MatchRecord& record);
     static bool writeJsonFile(const std::string& filepath, const MatchRecord& record);
+    static bool writePgnFile(const std::string& filepath, const MatchRecord& record);
     static bool parseJsonParity(const std::string& jsonStr, std::string& outSchemaVersion, uint32_t& outTotalGames, double& outScore, double& outDeltaElo);
 };
 

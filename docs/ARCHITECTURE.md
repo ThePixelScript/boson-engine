@@ -306,3 +306,18 @@ sequenceDiagram
 | **Accumulator Invariance Oracle** | Accumulator Stack | Reversible random walks | $A_{\text{incremental}} \equiv A_{\text{rebuild}}$ bit-for-bit | **LOCKED** |
 | **Model Ingestion Gate 7-G-2A** | CLI / Model Loader | `--require-nnue` on missing/invalid model | Immediate fail-fast `std::exit(1)` | **LOCKED** |
 | **Full Regression Battery** | Complete Engine | `boson_tests.exe` (34 test suites) | **34/34 suites passing cleanly** | **LOCKED** |
+
+---
+
+## 7. Engine Concurrency Model & Strategy A Tournament Isolation (Phase 8-F)
+
+Boson's search core is strictly single-threaded per search invocation. Multi-engine evaluation tournaments (such as head-to-head NNUE vs Classical matches) deploy **Strategy A** for cross-engine state isolation:
+
+- **Dedicated Persistent Contexts:** The tournament runner instantiates two long-lived worker threads (`PersistentWorkerEngine`):
+  * **Worker A:** Candidate-NNUE (`evalMode = 1`, active model `models/boson-v2.nnue`).
+  * **Worker B:** Control-Classical (`evalMode = 0`, hand-crafted evaluation).
+- **Thread-Local State Isolation:** All mutable search structures (`s_tt`, `SearchController`, `s_searchStack`, `s_killerMoves`, `s_historyTable`, `s_cmTable`, `s_chTable`, and `s_corrTable`) are marked `thread_local`, ensuring total physical memory separation between engines.
+- **Strictly Sequential Scheduling:** Game moves are processed sequentially across worker contexts. At any instant, at most one worker thread performs search execution; the opposing worker awaits task dispatch.
+- **Architectural Directive:**
+  > *"Single-threaded search per engine; two persistent execution contexts used only for state isolation; searches are never concurrent."*
+- **Explicit Architectural Boundary:** Strategy A is strictly an infrastructure isolation mechanism for deterministic head-to-head matches. It is **not** Lazy SMP, and it is **not** parallel chess search. (Parallel search remains planned under Milestone 9).

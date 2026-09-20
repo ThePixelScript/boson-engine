@@ -11,6 +11,16 @@ TranspositionTable::TranspositionTable(size_t megaBytes) noexcept {
     }
 }
 
+void TranspositionTable::resize(size_t megaBytes) noexcept {
+    size_t bytes = megaBytes * 1024 * 1024;
+    m_capacity = bytes / sizeof(TTEntry);
+    m_table.clear();
+    if (m_capacity > 0) {
+        m_table.resize(m_capacity);
+    }
+    clear();
+}
+
 void TranspositionTable::clear() noexcept {
     std::fill(m_table.begin(), m_table.end(), TTEntry{});
     m_probes = 0;

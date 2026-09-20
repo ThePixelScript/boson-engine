@@ -21,15 +21,6 @@ namespace Boson {
 
 namespace {
 
-struct SilentStreamBuffer {
-    std::streambuf* orig;
-    std::ostringstream dummy;
-    SilentStreamBuffer() : orig(std::cout.rdbuf(dummy.rdbuf())) {}
-    ~SilentStreamBuffer() {
-        std::cout.rdbuf(orig);
-    }
-};
-
 std::string fenFromPosition(const Position& pos) noexcept {
     std::string fen;
     static const std::array<char, 12> pieceChars = {
@@ -184,7 +175,8 @@ void InProcessUciEngine::sendCommand(std::string_view cmd) {
     if (cmd.starts_with("go ")) {
         std::string_view rest = cmd.substr(3);
         SearchLimits limits;
-        limits.clearTables = true;
+        limits.clearTables = false;
+        limits.silent = true;
 
         if (rest.starts_with("movetime ")) {
             int ms = std::stoi(std::string(rest.substr(9)));
@@ -199,10 +191,7 @@ void InProcessUciEngine::sendCommand(std::string_view cmd) {
         m_lastBestMove.clear();
         SearchController::getInstance().setParams(m_params);
 
-        {
-            SilentStreamBuffer silencer;
-            Search::runSearch(m_pos, limits);
-        }
+        Search::runSearch(m_pos, limits);
 
         const auto& stats = SearchController::getInstance().getStats();
         if (stats.pvLine.count > 0) {
@@ -232,6 +221,213 @@ void InProcessUciEngine::setParameters(const EngineParameters& params) {
 
 std::string InProcessUciEngine::getMetadata() const {
     if (m_params.eval.evalMode == 1) {
+        std::ostringstream ss;
+        const auto& sha = eval::nnue::NNUEEvaluator::getActiveModelSha256();
+        std::string shaDisplay = sha.empty() ? "N/A" : sha;
+        const char* backend = (eval::nnue::AVX2Inference::getActiveBackend() == eval::nnue::InferenceBackend::AVX2 ||
+                               (eval::nnue::AVX2Inference::getActiveBackend() == eval::nnue::InferenceBackend::Auto && eval::nnue::AVX2Inference::isSupported()))
+                              ? "AVX2" : "Scalar";
+        ss << "Eval_Mode=1 (NNUE), Model SHA-256=" << shaDisplay
+           << ", Backend=" << backend
+           << ", Network Version=" << eval::nnue::NNUE_VERSION;
+        return ss.str();
+    } else {
+        return "Eval_Mode=0 (Classical), Model SHA-256=N/A, Backend=N/A, Network Version=N/A";
+    }
+}
+
+// ---------------------------------------------------------------------------
+// PersistentWorkerEngine (Strategy A: Two Persistent Worker Contexts)
+// ---------------------------------------------------------------------------
+
+PersistentWorkerEngine::PersistentWorkerEngine(std::string name, const EngineParameters& params, size_t hashMb)
+    : m_name(std::move(name)), m_params(params), m_hashMb(hashMb), m_enforceEvalMode(params.eval.evalMode) {
+    m_workerThread = std::thread(&PersistentWorkerEngine::workerLoop, this);
+    std::unique_lock<std::mutex> lock(m_mutex);
+    m_cvReady.wait(lock, [this] { return m_ready; });
+}
+
+PersistentWorkerEngine::~PersistentWorkerEngine() {
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_stop = true;
+    }
+    m_cvTask.notify_one();
+    if (m_workerThread.joinable()) {
+        m_workerThread.join();
+    }
+}
+
+void PersistentWorkerEngine::workerLoop() {
+    m_workerThreadId = std::this_thread::get_id();
+
+    // 1. Thread-local Search & Evaluator Context Initialization
+    SearchController::getInstance().setParams(m_params);
+    Search::setEvaluatorMode(m_enforceEvalMode);
+    if (m_enforceEvalMode == 1) {
+        (void)eval::nnue::NNUEEvaluator::getInstance();
+    }
+    BenchmarkRunner::resetSearchState(m_hashMb);
+
+    auto opt = FenParser::parse("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+    if (opt) m_pos = *opt;
+
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_ready = true;
+    }
+    m_cvReady.notify_one();
+
+    while (true) {
+        std::function<void()> task;
+        {
+            std::unique_lock<std::mutex> lock(m_mutex);
+            m_cvTask.wait(lock, [this] { return m_stop || m_hasTask; });
+            if (m_stop && !m_hasTask) {
+                break;
+            }
+            task = std::move(m_task);
+            m_hasTask = false;
+        }
+
+        task();
+
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            m_taskDone = true;
+        }
+        m_cvDone.notify_one();
+    }
+}
+
+void PersistentWorkerEngine::postTask(std::function<void()> task) {
+    std::unique_lock<std::mutex> lock(m_mutex);
+    m_taskDone = false;
+    m_hasTask = true;
+    m_task = std::move(task);
+    m_cvTask.notify_one();
+    m_cvDone.wait(lock, [this] { return m_taskDone; });
+}
+
+void PersistentWorkerEngine::sendCommand(std::string_view cmd) {
+    std::string cmdStr(cmd);
+    postTask([this, cmdStr = std::move(cmdStr)]() {
+        // Invariant: enforce evaluator binding for this worker
+        Search::setEvaluatorMode(m_enforceEvalMode);
+
+        if (cmdStr == "ucinewgame") {
+            BenchmarkRunner::resetSearchState(m_hashMb);
+            auto opt = FenParser::parse("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+            if (opt) m_pos = *opt;
+            m_lastBestMove.clear();
+            m_resetCount.fetch_add(1, std::memory_order_relaxed);
+            return;
+        }
+
+        if (cmdStr.starts_with("position ")) {
+            std::string_view rest(cmdStr);
+            rest = rest.substr(9);
+            std::string baseFen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+
+            if (rest.starts_with("startpos")) {
+                rest = rest.substr(8);
+                auto opt = FenParser::parse(baseFen);
+                if (opt) m_pos = *opt;
+            } else if (rest.starts_with("fen ")) {
+                rest = rest.substr(4);
+                size_t movesPos = rest.find(" moves ");
+                std::string fenStr = (movesPos != std::string_view::npos) ? std::string(rest.substr(0, movesPos)) : std::string(rest);
+                auto opt = FenParser::parse(fenStr);
+                if (opt) m_pos = *opt;
+                if (movesPos != std::string_view::npos) {
+                    rest = rest.substr(movesPos);
+                } else {
+                    rest = "";
+                }
+            }
+
+            // Parse optional "moves m1 m2 ..."
+            size_t movesIdx = rest.find("moves ");
+            if (movesIdx != std::string_view::npos) {
+                std::string movesStr = std::string(rest.substr(movesIdx + 6));
+                std::istringstream iss(movesStr);
+                std::string moveToken;
+                while (iss >> moveToken) {
+                    MoveList legalMoves;
+                    MoveGenerator::generateLegalMoves(m_pos, legalMoves);
+                    bool applied = false;
+                    for (size_t i = 0; i < legalMoves.size(); ++i) {
+                        if (legalMoves[i].toString() == moveToken) {
+                            UndoState undo;
+                            MoveExecutor::makeMove(m_pos, legalMoves[i], undo);
+                            applied = true;
+                            break;
+                        }
+                    }
+                    if (!applied) {
+                        break;
+                    }
+                }
+            }
+            return;
+        }
+
+        if (cmdStr.starts_with("go ")) {
+            std::string_view rest(cmdStr);
+            rest = rest.substr(3);
+            SearchLimits limits;
+            limits.clearTables = false;
+            limits.silent = true;
+
+            if (rest.starts_with("movetime ")) {
+                int ms = std::stoi(std::string(rest.substr(9)));
+                limits.movetime = ms;
+            } else if (rest.starts_with("depth ")) {
+                int d = std::stoi(std::string(rest.substr(6)));
+                limits.depth = d;
+            } else {
+                limits.depth = 4; // fallback
+            }
+
+            m_lastBestMove.clear();
+            SearchController::getInstance().setParams(m_params);
+
+            Search::runSearch(m_pos, limits);
+
+            const auto& stats = SearchController::getInstance().getStats();
+            if (stats.pvLine.count > 0) {
+                m_lastBestMove = stats.pvLine.moves[0].toString();
+            } else {
+                std::stringstream ss(stats.pvString);
+                if (!(ss >> m_lastBestMove) || m_lastBestMove.empty()) {
+                    MoveList legalMoves;
+                    MoveGenerator::generateLegalMoves(m_pos, legalMoves);
+                    if (!legalMoves.empty()) {
+                        m_lastBestMove = legalMoves[0].toString();
+                    }
+                }
+            }
+            m_searchCount.fetch_add(1, std::memory_order_relaxed);
+            return;
+        }
+    });
+}
+
+std::string PersistentWorkerEngine::getBestMove(int timeoutMs) {
+    (void)timeoutMs;
+    return m_lastBestMove;
+}
+
+void PersistentWorkerEngine::setParameters(const EngineParameters& params) {
+    m_params = params;
+    m_params.eval.evalMode = m_enforceEvalMode;
+    postTask([this]() {
+        SearchController::getInstance().setParams(m_params);
+    });
+}
+
+std::string PersistentWorkerEngine::getMetadata() const {
+    if (m_enforceEvalMode == 1) {
         std::ostringstream ss;
         const auto& sha = eval::nnue::NNUEEvaluator::getActiveModelSha256();
         std::string shaDisplay = sha.empty() ? "N/A" : sha;
@@ -277,8 +473,11 @@ GameRecord MatchRunner::playGame(uint32_t gameId, IUciEngine& whiteEngine, IUciE
 
     GameRecord record;
     record.gameId = gameId;
+    record.gameInitialPosition = "startpos";
     record.openingId = std::string(opening.id);
     record.openingVersion = std::string(OpeningBook::VERSION);
+    record.openingMoveSequence = opening.moveSequence;
+    record.searchStartFen = std::string(opening.resultingFen);
     record.whiteEngine = whiteEngine.getName();
     record.blackEngine = blackEngine.getName();
 
@@ -462,11 +661,11 @@ MatchRecord MatchRunner::runMatch(const MatchConfig& config, IUciEngine* customE
     IUciEngine* engineB = customEngineB;
 
     if (!engineA) {
-        ownedA = std::make_unique<InProcessUciEngine>(config.engineA, config.paramsA, config.hashMb);
+        ownedA = std::make_unique<PersistentWorkerEngine>(config.engineA, config.paramsA, config.hashMb);
         engineA = ownedA.get();
     }
     if (!engineB) {
-        ownedB = std::make_unique<InProcessUciEngine>(config.engineB, config.paramsB, config.hashMb);
+        ownedB = std::make_unique<PersistentWorkerEngine>(config.engineB, config.paramsB, config.hashMb);
         engineB = ownedB.get();
     }
 

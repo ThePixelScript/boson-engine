@@ -280,3 +280,31 @@ Structured results can be parsed by automated CI/CD pipelines or stored in histo
 - **SPRT Status:** CONTINUE (LLR: -0.04 [$-2.94$, $+2.94$], $H_0: 0.0, H_1: +10.0$ Elo)
 - **Abnormal Terminations:** 0 (ThreefoldRepetition=68, Checkmate=26, FiftyMoveRule=5, InsufficientMaterial=1; 0 Timeouts, 0 Crashes, 0 Illegal Moves)
 - **Conclusion:** No statistically significant strength deviation detected at fast bullet time control ($50\text{ ms/move}$), confirming search stability and 100% tactical invariance under LMR reduction modulation.
+
+---
+
+## 9. Strategy A: Persistent Execution Contexts for Tournament Isolation (Phase 8-F)
+
+### 9.1 Architectural Specification
+To eliminate cross-engine state interference (transposition table pollution, heuristic contamination, and evaluator binding race conditions) without incurring process fork overhead, Phase 8-F introduces **Strategy A**:
+- **Worker A:** Bound permanently to Candidate-NNUE (`evalMode = 1`).
+- **Worker B:** Bound permanently to Control-Classical (`evalMode = 0`).
+- **Thread-Local State Isolation:** Each worker thread owns dedicated `thread_local` search state instances (Transposition Table `s_tt`, `SearchController`, `AccumulatorStack`, `NNUEEvaluator`, `HistoryTable`, `KillerMoves`, `CounterMoveTable`, `ContinuationHistoryTable`, and `CorrectionHistoryTable`).
+- **Sequential Turn Dispatch:** Game turns are posted to the active worker's task queue and executed sequentially with synchronous completion wait.
+- **Concurrency Directive:** *"Single-threaded search per engine; two persistent execution contexts used only for state isolation; searches are never concurrent."* (Explicitly: not Lazy SMP; not parallel chess search).
+
+### 9.2 Authoritative Opening & Telemetry Semantics
+Reporting schemas enforce strictly distinct fields to prevent conflation of initial board state and search positions:
+- `gameInitialPosition`: Genuine board initialization (`startpos` = `rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1`).
+- `openingId`: Identifier from the canonical 50-opening book (e.g., `open_01`).
+- `openingMoveSequence`: List of book moves played prior to engine search (e.g., `["e2e4", "e7e5", "g1f3", "b8c6", "f1c4", "f8c5"]`).
+- `searchStartFen`: Exact board FEN resulting from book moves immediately before the first engine search (`r1bqk1nr/pppp1ppp/2n5/2b1p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4`).
+
+PGN generation semantics remain standard: games begin from `startpos`, moves are numbered from move 1, and no synthetic `[SetUp "1"]` / `[FEN "..."]` headers are inserted.
+
+### 9.3 V1 Infrastructure Sanity Match
+- **Execution:** Exactly 2 games executed on opening `open_01`, fixed depth 6, 1 search thread per engine, 16 MB hash, active model `models/boson-v2.nnue` (SHA: `ef3386104547109445a47257c85afd99beef3cadbf7766566244e76a040dae92`).
+- **Telemetry Reconciliation:** Telemetry naming/semantic defect: `opening.resultingFen` was previously reported under the ambiguous `startingFen` label. The actual game initialization remained `startpos`, followed by the approved opening move sequence.
+- **Disposition:** **PASS WITH REPORTING CORRECTION** (historical files `checkpoints/phase8f_v1_match_record.json` and `checkpoints/phase8f_v1_games.pgn` preserved as historical artifacts predating the naming correction).
+- **Interpretation:** V1 validates execution-context isolation, evaluator identity, thread ownership, sequential scheduling, game-boundary reset, within-game TT preservation, and runtime correctness. V1 does NOT establish NNUE strength superiority, Classical superiority, Elo delta, SPRT evidence, or strength ranking.
+- **Authority Boundary:** 100-game benchmark = **NOT AUTHORIZED**. Final frozen-state review required before 100-game authorization.

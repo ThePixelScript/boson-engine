@@ -17,7 +17,7 @@ namespace Boson {
 class SearchController {
 public:
     static SearchController& getInstance() noexcept {
-        static SearchController instance;
+        static thread_local SearchController instance;
         return instance;
     }
 

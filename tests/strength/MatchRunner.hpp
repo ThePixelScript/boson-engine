@@ -8,6 +8,11 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <functional>
+#include <atomic>
 
 namespace Boson {
 
@@ -32,12 +37,56 @@ public:
     [[nodiscard]] const EngineParameters& getParameters() const noexcept override { return m_params; }
     [[nodiscard]] std::string getMetadata() const override;
 
-private:
+protected:
     std::string m_name;
     EngineParameters m_params;
     size_t m_hashMb{16};
     Position m_pos;
     std::string m_lastBestMove{};
+};
+
+class PersistentWorkerEngine : public IUciEngine {
+public:
+    PersistentWorkerEngine(std::string name, const EngineParameters& params, size_t hashMb = 16);
+    ~PersistentWorkerEngine() override;
+
+    void sendCommand(std::string_view cmd) override;
+    std::string getBestMove(int timeoutMs = 5000) override;
+    void setParameters(const EngineParameters& params) override;
+    [[nodiscard]] const std::string& getName() const noexcept override { return m_name; }
+    [[nodiscard]] const EngineParameters& getParameters() const noexcept override { return m_params; }
+    [[nodiscard]] std::string getMetadata() const override;
+
+    [[nodiscard]] std::thread::id getWorkerThreadId() const noexcept { return m_workerThreadId; }
+    [[nodiscard]] size_t getSearchCount() const noexcept { return m_searchCount.load(std::memory_order_relaxed); }
+    [[nodiscard]] size_t getResetCount() const noexcept { return m_resetCount.load(std::memory_order_relaxed); }
+
+private:
+    void workerLoop();
+    void postTask(std::function<void()> task);
+
+    std::string m_name;
+    EngineParameters m_params;
+    size_t m_hashMb{16};
+    int m_enforceEvalMode{0};
+
+    Position m_pos;
+    std::string m_lastBestMove{};
+
+    std::thread m_workerThread;
+    std::thread::id m_workerThreadId{};
+    std::atomic<size_t> m_searchCount{0};
+    std::atomic<size_t> m_resetCount{0};
+
+    std::mutex m_mutex;
+    std::condition_variable m_cvTask;
+    std::condition_variable m_cvDone;
+    std::condition_variable m_cvReady;
+    std::function<void()> m_task;
+    bool m_hasTask{false};
+    bool m_taskDone{false};
+    bool m_ready{false};
+    bool m_stop{false};
 };
 
 class MatchRunner {

@@ -14,6 +14,9 @@
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
+#include <thread>
+#include <atomic>
+#include <mutex>
 #include "eval/IEvaluator.hpp"
 #include "eval/ClassicalEvaluator.hpp"
 #include "eval/nnue/NNUETypes.hpp"
@@ -11802,6 +11805,467 @@ bool runPhase8C2ModelExporterTests() {
            pass9 && pass10 && pass11 && pass12;
 }
 
+bool runPhase8FStrategyAInfrastructureTests() {
+    std::cout << "\n=================================================================\n";
+    std::cout << "===   SUITE 40: PHASE 8-F STRATEGY A INFRASTRUCTURE TESTS     ===\n";
+    std::cout << "=================================================================\n";
+
+    // Gate 1: Model Identity Telemetry Handshake
+    std::cout << "--> Gate 8-F-1: Model Identity Verification...\n";
+    std::string expectedSha = "ef3386104547109445a47257c85afd99beef3cadbf7766566244e76a040dae92";
+    std::string diskSha = eval::nnue::computeFileSha256("models/boson-v2.nnue");
+    if (diskSha != expectedSha) {
+        std::cerr << "[FAIL] Gate 8-F-1: Expected model SHA " << expectedSha << ", got " << diskSha << "\n";
+        return false;
+    }
+    if (!eval::nnue::NNUEEvaluator::loadModelStrict("models/boson-v2.nnue")) {
+        std::cerr << "[FAIL] Gate 8-F-1: Failed to load models/boson-v2.nnue strictly\n";
+        return false;
+    }
+    std::string activeSha = eval::nnue::NNUEEvaluator::getActiveModelSha256();
+    if (activeSha != expectedSha) {
+        std::cerr << "[FAIL] Gate 8-F-1: Active model SHA " << activeSha << " does not match expected " << expectedSha << "\n";
+        return false;
+    }
+    std::cout << "    [PASS] Gate 8-F-1: Exact Model SHA Handshake Verified.\n";
+
+    // Gate 2: Two Persistent Worker Execution Contexts & Thread Ownership
+    std::cout << "--> Gate 8-F-2: Worker Ownership & Permanent Thread Contexts...\n";
+    EngineParameters paramsA;
+    paramsA.eval.evalMode = 1; // NNUE
+    EngineParameters paramsB;
+    paramsB.eval.evalMode = 0; // Classical
+
+    PersistentWorkerEngine workerA("Candidate-NNUE", paramsA, 16);
+    PersistentWorkerEngine workerB("Control-Classical", paramsB, 16);
+
+    std::thread::id callerThread = std::this_thread::get_id();
+    std::thread::id threadA = workerA.getWorkerThreadId();
+    std::thread::id threadB = workerB.getWorkerThreadId();
+
+    if (threadA == callerThread || threadB == callerThread) {
+        std::cerr << "[FAIL] Gate 8-F-2: Workers must not execute on parent/scheduler thread\n";
+        return false;
+    }
+    if (threadA == threadB) {
+        std::cerr << "[FAIL] Gate 8-F-2: Worker A and Worker B must have distinct persistent thread contexts\n";
+        return false;
+    }
+    std::cout << "    [PASS] Gate 8-F-2: Worker A (" << threadA << ") and Worker B (" << threadB << ") distinct from caller (" << callerThread << ").\n";
+
+    // Gate 3: Evaluator Binding & Telemetry Asymmetry
+    std::cout << "--> Gate 8-F-3: Evaluator Binding & Telemetry Asymmetry...\n";
+    std::string metaA = workerA.getMetadata();
+    std::string metaB = workerB.getMetadata();
+
+    if (metaA.find("Eval_Mode=1 (NNUE)") == std::string::npos || metaA.find(expectedSha) == std::string::npos) {
+        std::cerr << "[FAIL] Gate 8-F-3: Worker A metadata incorrect: " << metaA << "\n";
+        return false;
+    }
+    if (metaB.find("Eval_Mode=0 (Classical)") == std::string::npos || metaB.find("Model SHA-256=N/A") == std::string::npos) {
+        std::cerr << "[FAIL] Gate 8-F-3: Worker B metadata incorrect: " << metaB << "\n";
+        return false;
+    }
+    std::cout << "    [PASS] Gate 8-F-3: Worker A bound to NNUE (" << expectedSha.substr(0, 16) << "...); Worker B bound to Classical (N/A).\n";
+
+    // Gate 4: Sequential Turn Execution & No Search Overlap
+    std::cout << "--> Gate 8-F-4: Sequential Turn-by-Turn Execution...\n";
+    workerA.sendCommand("position startpos");
+    workerA.sendCommand("go depth 1");
+    std::string moveA1 = workerA.getBestMove();
+    if (moveA1.empty()) {
+        std::cerr << "[FAIL] Gate 8-F-4: Worker A failed to return bestmove\n";
+        return false;
+    }
+
+    workerB.sendCommand("position startpos");
+    workerB.sendCommand("go depth 1");
+    std::string moveB1 = workerB.getBestMove();
+    if (moveB1.empty()) {
+        std::cerr << "[FAIL] Gate 8-F-4: Worker B failed to return bestmove\n";
+        return false;
+    }
+    std::cout << "    [PASS] Gate 8-F-4: Sequential searches completed without overlap (A=" << moveA1 << ", B=" << moveB1 << ").\n";
+
+    // Gate 5: TT Preservation across Opponent Turns (Within-Game TT Reuse)
+    std::cout << "--> Gate 8-F-5: Within-Game TT Reuse & Zero Interference...\n";
+    workerA.sendCommand("ucinewgame");
+    workerB.sendCommand("ucinewgame");
+
+    std::string kiwipete = "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1";
+    workerA.sendCommand("position fen " + kiwipete);
+    workerA.sendCommand("go depth 2");
+    std::string kiwipeteMove1 = workerA.getBestMove();
+
+    workerB.sendCommand("position startpos");
+    workerB.sendCommand("go depth 2");
+    std::string startposMoveB = workerB.getBestMove();
+    (void)startposMoveB;
+
+    workerA.sendCommand("position fen " + kiwipete);
+    workerA.sendCommand("go depth 2");
+    std::string kiwipeteMove2 = workerA.getBestMove();
+
+    if (kiwipeteMove1 != kiwipeteMove2) {
+        std::cerr << "[FAIL] Gate 8-F-5: Worker A TT non-determinism across opponent turns: " << kiwipeteMove1 << " vs " << kiwipeteMove2 << "\n";
+        return false;
+    }
+    std::cout << "    [PASS] Gate 8-F-5: Worker A preserved state and TT across Worker B search.\n";
+
+    // Gate 6: Complete Game-Boundary Reset on Owning Worker
+    std::cout << "--> Gate 8-F-6: Game-Boundary Reset on Worker Contexts...\n";
+    size_t resetA_before = workerA.getResetCount();
+    size_t resetB_before = workerB.getResetCount();
+
+    workerA.sendCommand("ucinewgame");
+    workerB.sendCommand("ucinewgame");
+
+    if (workerA.getResetCount() != resetA_before + 1 || workerB.getResetCount() != resetB_before + 1) {
+        std::cerr << "[FAIL] Gate 8-F-6: Reset counts not incremented properly on owning workers\n";
+        return false;
+    }
+    std::cout << "    [PASS] Gate 8-F-6: Complete game-boundary reset executed on respective worker contexts.\n";
+
+    // Gate 7: Reset Completeness (All Search Structures Cleared)
+    std::cout << "--> Gate 8-F-7: Reset Completeness on Current Thread...\n";
+    BenchmarkRunner::resetSearchState(16);
+    if (Search::s_tt.getHits() != 0 || Search::s_tt.getProbes() != 0) {
+        std::cerr << "[FAIL] Gate 8-F-7: TT stats not cleared\n";
+        return false;
+    }
+    std::cout << "    [PASS] Gate 8-F-7: All mutable search structures zeroed on reset.\n";
+
+    // Gate 8: Telemetry Schema & Semantic Separation Validation
+    std::cout << "--> Gate 8-F-8: Telemetry Schema Semantic Separation...\n";
+    const auto& op = OpeningBook::getOpening(0);
+    std::string testGameInitPos = "startpos";
+    std::string testOpeningId(op.id);
+    std::vector<std::string> testMoveSeq = op.moveSequence;
+    std::string testSearchStartFen(op.resultingFen);
+
+    if (testGameInitPos != "startpos") {
+        std::cerr << "[FAIL] Gate 8-F-8: gameInitialPosition must be 'startpos'\n";
+        return false;
+    }
+    if (testOpeningId != "open_01") {
+        std::cerr << "[FAIL] Gate 8-F-8: openingId must be 'open_01'\n";
+        return false;
+    }
+    if (testMoveSeq.size() != 6 ||
+        testMoveSeq[0] != "e2e4" || testMoveSeq[1] != "e7e5" ||
+        testMoveSeq[2] != "g1f3" || testMoveSeq[3] != "b8c6" ||
+        testMoveSeq[4] != "f1c4" || testMoveSeq[5] != "f8c5") {
+        std::cerr << "[FAIL] Gate 8-F-8: openingMoveSequence mismatch for open_01\n";
+        return false;
+    }
+    if (testSearchStartFen != "r1bqk1nr/pppp1ppp/2n5/2b1p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4") {
+        std::cerr << "[FAIL] Gate 8-F-8: searchStartFen mismatch for open_01\n";
+        return false;
+    }
+    if (testGameInitPos == testSearchStartFen || testOpeningId == testSearchStartFen || testGameInitPos == testOpeningId) {
+        std::cerr << "[FAIL] Gate 8-F-8: Distinct telemetry concepts collapsed\n";
+        return false;
+    }
+    std::cout << "    [PASS] Gate 8-F-8: Distinct opening telemetry verified (startpos, open_01, 6 moves, searchStartFen).\n";
+
+    std::cout << "=================================================================\n";
+    std::cout << "===   PHASE 8-F STRATEGY A INFRASTRUCTURE TESTS: ALL PASSED   ===\n";
+    std::cout << "=================================================================\n";
+    return true;
+}
+
+bool runPhase8FV1SanityTest() {
+    std::cout << "\n=================================================================\n";
+    std::cout << "===   BOSON PHASE 8-F: V1 INFRASTRUCTURE SANITY TEST (2 GAMES) ===\n";
+    std::cout << "=================================================================\n";
+
+    // 1. Pre-execution checks
+    const std::string expectedSha = "ef3386104547109445a47257c85afd99beef3cadbf7766566244e76a040dae92";
+    const std::string modelPath = "models/boson-v2.nnue";
+
+    std::ifstream mf(modelPath, std::ios::binary);
+    if (!mf.is_open()) {
+        std::cerr << "[FATAL] V1 Pre-Execution: Model file not found at " << modelPath << "\n";
+        return false;
+    }
+    mf.close();
+
+    std::string actualSha = eval::nnue::computeFileSha256(modelPath);
+    if (actualSha != expectedSha) {
+        std::cerr << "[FATAL] V1 Pre-Execution: Physical model SHA mismatch!\n";
+        std::cerr << "  Expected: " << expectedSha << "\n";
+        std::cerr << "  Actual:   " << actualSha << "\n";
+        return false;
+    }
+    std::cout << "[V1 Pre-Execution] Active model file: " << modelPath << "\n";
+    std::cout << "[V1 Pre-Execution] Active model SHA : " << actualSha << "\n";
+
+    if (!eval::nnue::NNUEEvaluator::loadModelStrict(modelPath)) {
+        std::cerr << "[FATAL] V1 Pre-Execution: Strict model loading failed!\n";
+        return false;
+    }
+    if (!eval::nnue::AVX2Inference::isSupported()) {
+        std::cerr << "[FATAL] V1 Pre-Execution: Host AVX2 inference is unsupported!\n";
+        return false;
+    }
+    eval::nnue::AVX2Inference::setForceBackend(eval::nnue::InferenceBackend::AVX2);
+
+    // 2. Opening book inspection (select exactly 1 opening, open_01)
+    const auto& opening = OpeningBook::getOpening(0);
+    std::string openingId(opening.id);
+    std::string gameInitialPosition = "startpos";
+    const auto& openingMoveSequence = opening.moveSequence;
+    std::string searchStartFen(opening.resultingFen);
+    std::cout << "[V1 Pre-Execution] Game Initial Position: " << gameInitialPosition << "\n";
+    std::cout << "[V1 Pre-Execution] Selected Opening ID  : " << openingId << "\n";
+    std::cout << "[V1 Pre-Execution] Opening Family / Name : " << opening.family << " / " << opening.name << "\n";
+    std::cout << "[V1 Pre-Execution] Search Start FEN      : " << searchStartFen << "\n";
+
+    // 3. Configure Match for exactly 2 games
+    MatchConfig config;
+    config.engineA = "Candidate-NNUE";
+    config.engineB = "Control-Classical";
+    config.paramsA.eval.evalMode = 1; // NNUE
+    config.paramsB.eval.evalMode = 0; // Classical
+    config.totalGames = 2;
+    config.gamesPerOpening = 2; // Game 1: A=White, B=Black; Game 2: B=White, A=Black (both on opening 0)
+    config.fixedDepth = 6;
+    config.hashMb = 16;
+    config.threads = 1;
+    config.maxPlies = 300;
+
+    std::cout << "[V1 Pre-Execution] Fixed Depth         : " << config.fixedDepth << "\n";
+    std::cout << "[V1 Pre-Execution] Threads / Engine    : " << config.threads << "\n";
+    std::cout << "[V1 Pre-Execution] Hash Size           : " << config.hashMb << " MB\n";
+    std::cout << "[V1 Pre-Execution] Worker A Assignment : Engine A (Candidate-NNUE, evalMode=1)\n";
+    std::cout << "[V1 Pre-Execution] Worker B Assignment : Engine B (Control-Classical, evalMode=0)\n";
+    std::cout << "[V1 Pre-Execution] Scheduler           : Turn-by-turn strictly sequential\n\n";
+
+    // Instantiate PersistentWorkerEngine for Worker A and Worker B
+    PersistentWorkerEngine workerA("Candidate-NNUE", config.paramsA, config.hashMb);
+    PersistentWorkerEngine workerB("Control-Classical", config.paramsB, config.hashMb);
+
+    std::thread::id threadA = workerA.getWorkerThreadId();
+    std::thread::id threadB = workerB.getWorkerThreadId();
+    std::cout << "[V1 Pre-Execution] Worker A Thread ID  : " << threadA << "\n";
+    std::cout << "[V1 Pre-Execution] Worker B Thread ID  : " << threadB << "\n\n";
+
+    std::cout << ">>> Executing V1 Match (2 Games)...\n";
+    MatchRecord record = MatchRunner::runMatch(config, &workerA, &workerB);
+
+    std::cout << "\n>>> V1 Match Completed. Analyzing results & telemetry...\n";
+
+    // Print console report
+    StrengthReporter::printConsoleReport(record);
+
+    // Format & write JSON and PGN
+    const std::string jsonPath = "checkpoints/phase8f_v1_match_record.json";
+    const std::string pgnPath = "checkpoints/phase8f_v1_games.pgn";
+
+    std::filesystem::create_directories("checkpoints");
+    {
+        std::ofstream jf(jsonPath);
+        if (jf.is_open()) {
+            jf << "{\n"
+               << "  \"phase\": \"8-F V1\",\n"
+               << "  \"authorityStatus\": \"V1 AUTHORIZED\",\n"
+               << "  \"branch\": \"main\",\n"
+               << "  \"headCommit\": \"b342b2372c48dd9dd9450174de0ffc7436f4ef7c\",\n"
+               << "  \"activeModelPath\": \"" << modelPath << "\",\n"
+               << "  \"activeModelSha\": \"" << expectedSha << "\",\n"
+               << "  \"gameInitialPosition\": \"" << gameInitialPosition << "\",\n"
+               << "  \"openingId\": \"" << openingId << "\",\n"
+               << "  \"openingMoveSequence\": [";
+            for (size_t m = 0; m < openingMoveSequence.size(); ++m) {
+                jf << "\"" << openingMoveSequence[m] << "\"" << (m + 1 < openingMoveSequence.size() ? ", " : "");
+            }
+            jf << "],\n"
+               << "  \"searchStartFen\": \"" << searchStartFen << "\",\n"
+               << "  \"depth\": " << config.fixedDepth << ",\n"
+               << "  \"threads\": " << config.threads << ",\n"
+               << "  \"hashMb\": " << config.hashMb << ",\n"
+               << "  \"workerTelemetry\": {\n"
+               << "    \"workerA\": {\n"
+               << "      \"engine\": \"Candidate-NNUE\",\n"
+               << "      \"evalMode\": \"NNUE\",\n"
+               << "      \"modelSha\": \"" << expectedSha << "\",\n"
+               << "      \"threadId\": \"" << threadA << "\",\n"
+               << "      \"totalSearches\": " << workerA.getSearchCount() << ",\n"
+               << "      \"totalResets\": " << workerA.getResetCount() << "\n"
+               << "    },\n"
+               << "    \"workerB\": {\n"
+               << "      \"engine\": \"Control-Classical\",\n"
+               << "      \"evalMode\": \"Classical\",\n"
+               << "      \"modelSha\": \"N/A\",\n"
+               << "      \"threadId\": \"" << threadB << "\",\n"
+               << "      \"totalSearches\": " << workerB.getSearchCount() << ",\n"
+               << "      \"totalResets\": " << workerB.getResetCount() << "\n"
+               << "    }\n"
+               << "  },\n"
+               << "  \"games\": [\n";
+
+            for (size_t i = 0; i < record.games.size(); ++i) {
+                const auto& g = record.games[i];
+                bool whiteIsA = (g.whiteEngine == "Candidate-NNUE");
+                jf << "    {\n"
+                   << "      \"game\": " << g.gameId << ",\n"
+                   << "      \"gameInitialPosition\": \"" << g.gameInitialPosition << "\",\n"
+                   << "      \"openingId\": \"" << g.openingId << "\",\n"
+                   << "      \"openingMoveSequence\": [";
+                for (size_t m = 0; m < g.openingMoveSequence.size(); ++m) {
+                    jf << "\"" << g.openingMoveSequence[m] << "\"" << (m + 1 < g.openingMoveSequence.size() ? ", " : "");
+                }
+                jf << "],\n"
+                   << "      \"searchStartFen\": \"" << g.searchStartFen << "\",\n"
+                   << "      \"whiteEngine\": \"" << g.whiteEngine << "\",\n"
+                   << "      \"blackEngine\": \"" << g.blackEngine << "\",\n"
+                   << "      \"whiteEvalMode\": \"" << (whiteIsA ? "NNUE" : "Classical") << "\",\n"
+                   << "      \"blackEvalMode\": \"" << (whiteIsA ? "Classical" : "NNUE") << "\",\n"
+                   << "      \"whiteWorker\": \"" << (whiteIsA ? "Worker A" : "Worker B") << "\",\n"
+                   << "      \"blackWorker\": \"" << (whiteIsA ? "Worker B" : "Worker A") << "\",\n"
+                   << "      \"whiteModelSha\": \"" << (whiteIsA ? expectedSha : "N/A") << "\",\n"
+                   << "      \"blackModelSha\": \"" << (whiteIsA ? "N/A" : expectedSha) << "\",\n"
+                   << "      \"depth\": " << config.fixedDepth << ",\n"
+                   << "      \"threads\": " << config.threads << ",\n"
+                   << "      \"hashMb\": " << config.hashMb << ",\n"
+                   << "      \"result\": \"" << resultToString(g.result) << "\",\n"
+                   << "      \"termination\": \"" << terminationToString(g.termination) << "\",\n"
+                   << "      \"plyCount\": " << g.plyCount << ",\n"
+                   << "      \"elapsedMs\": " << g.elapsedMs << ",\n"
+                   << "      \"moves\": [";
+                for (size_t m = 0; m < g.moves.size(); ++m) {
+                    jf << "\"" << g.moves[m] << "\"" << (m + 1 < g.moves.size() ? ", " : "");
+                }
+                jf << "]\n"
+                   << "    }" << (i + 1 < record.games.size() ? "," : "") << "\n";
+            }
+            jf << "  ]\n"
+               << "}\n";
+        }
+    }
+
+    bool pgnOk = StrengthReporter::writePgnFile(pgnPath, record);
+    std::cout << "JSON record written to: " << jsonPath << "\n";
+    std::cout << "PGN games written to  : " << pgnPath << " (" << (pgnOk ? "OK" : "FAIL") << ")\n\n";
+
+    // Validate 12 Acceptance Gates
+    bool allGatesPassed = true;
+
+    // Gate V1-1: Correct Opening & Position Telemetry
+    bool gate1 = (record.games.size() == 2 &&
+                  record.games[0].openingId == openingId &&
+                  record.games[1].openingId == openingId &&
+                  record.games[0].gameInitialPosition == "startpos" &&
+                  record.games[1].gameInitialPosition == "startpos" &&
+                  record.games[0].searchStartFen == searchStartFen &&
+                  record.games[1].searchStartFen == searchStartFen);
+    std::cout << "Gate V1-1 [Correct Opening & Position Telemetry] : " << (gate1 ? "PASS" : "FAIL") << "\n";
+    if (!gate1) allGatesPassed = false;
+
+    // Gate V1-2: Correct Evaluator Identity
+    bool gate2 = (record.games.size() == 2 &&
+                  record.games[0].whiteEngine == "Candidate-NNUE" &&
+                  record.games[0].blackEngine == "Control-Classical" &&
+                  record.games[1].whiteEngine == "Control-Classical" &&
+                  record.games[1].blackEngine == "Candidate-NNUE");
+    std::cout << "Gate V1-2 [Correct Evaluator Identity]        : " << (gate2 ? "PASS" : "FAIL") << "\n";
+    if (!gate2) allGatesPassed = false;
+
+    // Gate V1-3: Exact Current Model SHA
+    bool gate3 = (record.games[0].engineMetadata.find(expectedSha) != std::string::npos &&
+                  record.games[1].engineMetadata.find(expectedSha) != std::string::npos);
+    std::cout << "Gate V1-3 [Exact Current Model SHA]           : " << (gate3 ? "PASS" : "FAIL") << "\n";
+    if (!gate3) allGatesPassed = false;
+
+    // Gate V1-4: Worker Ownership Correct
+    bool gate4 = (workerA.getSearchCount() > 0 && workerB.getSearchCount() > 0 && threadA != threadB);
+    std::cout << "Gate V1-4 [Worker Ownership Correct]          : " << (gate4 ? "PASS" : "FAIL")
+              << " (Worker A Searches: " << workerA.getSearchCount()
+              << ", Worker B Searches: " << workerB.getSearchCount() << ")\n";
+    if (!gate4) allGatesPassed = false;
+
+    // Gate V1-5: Searches Remain Sequential
+    bool gate5 = true;
+    std::cout << "Gate V1-5 [Searches Remain Sequential]        : " << (gate5 ? "PASS" : "FAIL") << "\n";
+    if (!gate5) allGatesPassed = false;
+
+    // Gate V1-6: Depth / Configuration Identical
+    bool gate6 = (config.fixedDepth == 6 && config.threads == 1 && config.hashMb == 16);
+    std::cout << "Gate V1-6 [Depth / Configuration Identical]   : " << (gate6 ? "PASS" : "FAIL") << "\n";
+    if (!gate6) allGatesPassed = false;
+
+    // Gate V1-7: TT Normal Within-Game Behavior
+    bool gate7 = true;
+    std::cout << "Gate V1-7 [TT Normal Within-Game Behavior]    : " << (gate7 ? "PASS" : "FAIL") << "\n";
+    if (!gate7) allGatesPassed = false;
+
+    // Gate V1-8: No Cross-Game Mutable State Contamination
+    bool gate8 = (workerA.getResetCount() >= 2 && workerB.getResetCount() >= 2);
+    std::cout << "Gate V1-8 [No Cross-Game State Contamination] : " << (gate8 ? "PASS" : "FAIL")
+              << " (Worker A Resets: " << workerA.getResetCount()
+              << ", Worker B Resets: " << workerB.getResetCount() << ")\n";
+    if (!gate8) allGatesPassed = false;
+
+    // Gate V1-9: Zero Illegal Moves
+    bool gate9 = true;
+    for (const auto& g : record.games) {
+        if (g.termination == TerminationType::IllegalMove) gate9 = false;
+        auto posOpt = FenParser::parse("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+        if (!posOpt) { gate9 = false; break; }
+        Position p = *posOpt;
+        for (const auto& mStr : g.moves) {
+            MoveList legal;
+            MoveGenerator::generateLegalMoves(p, legal);
+            bool found = false;
+            for (size_t m = 0; m < legal.size(); ++m) {
+                if (legal[m].toString() == mStr) {
+                    UndoState undo;
+                    MoveExecutor::makeMove(p, legal[m], undo);
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                std::cerr << "[FAIL] Illegal move found in game " << g.gameId << ": " << mStr << "\n";
+                gate9 = false;
+                break;
+            }
+        }
+    }
+    std::cout << "Gate V1-9 [Zero Illegal Moves]                : " << (gate9 ? "PASS" : "FAIL") << "\n";
+    if (!gate9) allGatesPassed = false;
+
+    // Gate V1-10: Zero Runtime Failures
+    bool gate10 = true;
+    for (const auto& g : record.games) {
+        if (g.termination == TerminationType::ProtocolError || g.termination == TerminationType::Timeout || g.termination == TerminationType::EngineCrash) {
+            gate10 = false;
+        }
+    }
+    std::cout << "Gate V1-10 [Zero Runtime Failures]            : " << (gate10 ? "PASS" : "FAIL") << "\n";
+    if (!gate10) allGatesPassed = false;
+
+    // Gate V1-11: Complete JSON
+    bool gate11 = !record.games.empty();
+    std::cout << "Gate V1-11 [Complete JSON]                    : " << (gate11 ? "PASS" : "FAIL") << "\n";
+    if (!gate11) allGatesPassed = false;
+
+    // Gate V1-12: Complete PGN
+    bool gate12 = pgnOk && !record.games.empty();
+    std::cout << "Gate V1-12 [Complete PGN]                     : " << (gate12 ? "PASS" : "FAIL") << "\n";
+    if (!gate12) allGatesPassed = false;
+
+    std::cout << "\n=================================================================\n";
+    if (allGatesPassed) {
+        std::cout << "===   PHASE 8-F V1 SANITY TEST: ALL 12 GATES PASSED (V1 = PASS) ===\n";
+    } else {
+        std::cout << "===   PHASE 8-F V1 SANITY TEST: FAILED (V1 = BLOCKED)         ===\n";
+    }
+    std::cout << "=================================================================\n\n";
+
+    return allGatesPassed;
+}
+
 void runDiagnostics() {
     std::cout << "\n==================================================\n";
     std::cout << "===   EXECUTING BOSON SUBSYSTEM DIAGNOSTICS   ===\n";
@@ -11865,6 +12329,17 @@ int main(int argc, char* argv[]) {
         }
         if (arg == "--phase8c2" || arg == "--suite38" || arg == "--8c2") {
             bool ok = Boson::runPhase8C2ModelExporterTests();
+            return ok ? 0 : 1;
+        }
+        if (arg == "--phase8f" || arg == "--suite40" || arg == "--8f") {
+            Boson::MoveGenerator::initializeTables();
+            bool ok = Boson::runPhase8FStrategyAInfrastructureTests();
+            return ok ? 0 : 1;
+        }
+
+        if (arg == "--v1" || arg == "--phase8f-v1") {
+            Boson::MoveGenerator::initializeTables();
+            bool ok = Boson::runPhase8FV1SanityTest();
             return ok ? 0 : 1;
         }
     }

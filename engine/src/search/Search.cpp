@@ -14,18 +14,28 @@
 
 namespace Boson {
 
-TranspositionTable Search::s_tt(16);
-CounterMoveTable Search::s_cmTable; 
-ContinuationHistoryTable Search::s_chTable;
-std::array<std::array<Move, 2>, 64> Search::s_killerMoves{};
-std::array<std::array<uint32_t, 64>, 12> Search::s_historyTable{};
-std::array<Search::StackEntry, 128> Search::s_searchStack{};
+thread_local TranspositionTable Search::s_tt(16);
+thread_local CounterMoveTable Search::s_cmTable;
+thread_local ContinuationHistoryTable Search::s_chTable;
+thread_local std::array<std::array<Move, 2>, 64> Search::s_killerMoves{};
+thread_local std::array<std::array<uint32_t, 64>, 12> Search::s_historyTable{};
+thread_local std::array<Search::StackEntry, 128> Search::s_searchStack{};
 
-eval::ClassicalEvaluator Search::m_defaultEvaluator{};
-eval::IEvaluator* Search::m_evaluator = &Search::m_defaultEvaluator;
+thread_local eval::ClassicalEvaluator Search::m_defaultEvaluator{};
+thread_local eval::IEvaluator* Search::m_evaluator = &Search::m_defaultEvaluator;
 
 eval::IEvaluator& Search::getDefaultNNUEEvaluator() noexcept {
     return eval::nnue::NNUEEvaluator::getInstance();
+}
+
+void Search::clearAllSearchState() noexcept {
+    s_tt.clear();
+    clearKillerMoves();
+    clearHistory();
+    clearCMH();
+    clearContHist();
+    clearStack();
+    Evaluator::getCorrHist().clear();
 }
 
 void Search::setEvaluator(eval::IEvaluator* evaluator) noexcept {
@@ -168,6 +178,10 @@ int Search::quiescence(Position& pos, int alpha, int beta, int ply) noexcept {
 }
 
 int Search::negamax(Position& pos, int depth, int alpha, int beta, int ply, PVLine& pv, bool allowNull, Move prevMove) noexcept {
+    if (ply >= MAX_PLY - 1) {
+        return m_evaluator ? m_evaluator->evaluate(pos) : 0;
+    }
+
     auto& controller = SearchController::getInstance();
     auto& stats = controller.getStats();
     const auto& params = controller.getParams();
@@ -633,7 +647,9 @@ int Search::runSearch(Position& pos, const SearchLimits& limits) noexcept {
         clearStack();
     } 
 
-    std::cout << "[BOSON SEARCH] Running Ordered Alpha-Beta + Aspiration Framework...\n";
+    if (!limits.silent) {
+        std::cout << "[BOSON SEARCH] Running Ordered Alpha-Beta + Aspiration Framework...\n";
+    }
 
     int lastScore = 0;
     PVLine stablePv;
@@ -681,12 +697,14 @@ int Search::runSearch(Position& pos, const SearchLimits& limits) noexcept {
         stats.pvString = currentPvStr;
         stats.pvLine = stablePv;
 
-        std::cout << "info depth " << d 
-                  << " score cp " << lastScore 
-                  << " nodes " << totalNodes 
-                  << " nps " << nps 
-                  << " time " << stats.elapsedTimeMs 
-                  << " pv" << stats.pvString << std::endl;
+        if (!limits.silent) {
+            std::cout << "info depth " << d
+                      << " score cp " << lastScore
+                      << " nodes " << totalNodes
+                      << " nps " << nps
+                      << " time " << stats.elapsedTimeMs
+                      << " pv" << stats.pvString << std::endl;
+        }
     }
 
     if (stablePv.count == 0) {
@@ -712,46 +730,48 @@ int Search::runSearch(Position& pos, const SearchLimits& limits) noexcept {
         stats.stopReason = StopReason::MaxDepthReached;
     }
 
-    std::cout << "\n--- Aspiration Optimization Analytics ---\n";
-    std::cout << "  -> Total Window Successes : " << stats.aspirationSuccesses << "\n";
-    std::cout << "  -> Window Fail Highs       : " << stats.aspirationFailHigh << "\n";
-    std::cout << "  -> Window Fail Lows        : " << stats.aspirationFailLow << "\n";
-    std::cout << "  -> Total Re-Searches Hit   : " << stats.aspirationResearches << "\n";
-    
-    std::cout << "\n--- Null Move Pruning Analytics ---\n";
-    std::cout << "  -> Null Move Attempts      : " << stats.nullMoveAttempts << "\n";
-    std::cout << "  -> Null Move Cutoffs       : " << stats.nullMoveCutoffs << "\n";
-    std::cout << "  -> Null Move Failures      : " << stats.nullMoveFailures << "\n";
-    std::cout << "  -> Zugzwang Protections    : " << stats.nullDisabled << "\n";
-    std::cout << "[BOSON CLOCK] Search Complete. Stop Reason Code: " << static_cast<int>(stats.stopReason) << "\n";
-    
-    std::cout << "\n--- Late Move Reduction Analytics ---\n";
-    std::cout << "  -> LMR Reduction Attempts  : " << stats.lmrAttempts << "\n";
-    std::cout << "  -> LMR Reduced Nodes       : " << stats.lmrReducedNodes << "\n";
-    
-    uint64_t totalLmr = stats.lmrAttempts;
-    double researchRate = totalLmr > 0 ? (static_cast<double>(stats.lmrResearches) / totalLmr) * 100.0 : 0.0;
-    double successRate = stats.lmrResearches > 0 ? (static_cast<double>(stats.successfulResearches) / stats.lmrResearches) * 100.0 : 0.0;
+    if (!limits.silent) {
+        std::cout << "\n--- Aspiration Optimization Analytics ---\n";
+        std::cout << "  -> Total Window Successes : " << stats.aspirationSuccesses << "\n";
+        std::cout << "  -> Window Fail Highs       : " << stats.aspirationFailHigh << "\n";
+        std::cout << "  -> Window Fail Lows        : " << stats.aspirationFailLow << "\n";
+        std::cout << "  -> Total Re-Searches Hit   : " << stats.aspirationResearches << "\n";
 
-    std::cout << "  -> Triggered Re-Searches   : " << stats.lmrResearches << " (" << researchRate << "% of reduced nodes)\n";
-    std::cout << "  -> Successful PV Overturns : " << stats.successfulResearches << " (" << successRate << "% efficiency)\n";
+        std::cout << "\n--- Null Move Pruning Analytics ---\n";
+        std::cout << "  -> Null Move Attempts      : " << stats.nullMoveAttempts << "\n";
+        std::cout << "  -> Null Move Cutoffs       : " << stats.nullMoveCutoffs << "\n";
+        std::cout << "  -> Null Move Failures      : " << stats.nullMoveFailures << "\n";
+        std::cout << "  -> Zugzwang Protections    : " << stats.nullDisabled << "\n";
+        std::cout << "[BOSON CLOCK] Search Complete. Stop Reason Code: " << static_cast<int>(stats.stopReason) << "\n";
 
-    std::cout << "\n--- Counter-Move History (CMH) Analytics ---\n";
-    std::cout << "  -> CMH Table Hits          : " << stats.cmhHits << "\n";
-    std::cout << "  -> CMH Triggered Cutoffs   : " << stats.cmhCutoffs << "\n";
-    
-    std::cout << "\n--- Continuation History Analytics ---\n";
-    std::cout << "  -> Continuation Table Hits : " << stats.conthistHits << "\n";
-    std::cout << "  -> Continuation Cutoffs    : " << stats.conthistCutoffs << "\n";
-    std::cout << "  -> Table Normalization Evts: " << stats.normalizationEvents << "\n";
+        std::cout << "\n--- Late Move Reduction Analytics ---\n";
+        std::cout << "  -> LMR Reduction Attempts  : " << stats.lmrAttempts << "\n";
+        std::cout << "  -> LMR Reduced Nodes       : " << stats.lmrReducedNodes << "\n";
 
-    std::cout << "\n--- Correction History Analytics ---\n";
-    std::cout << "  -> Bias Corrections Applied: " << stats.corrApplied << " (+:" << stats.corrPositive << " -:" << stats.corrNegative << ")\n";
-    std::cout << "  -> Evaluator Bias Updates  : " << stats.corrUpdates << "\n";
-    std::cout << "  -> Total Correction Mag    : " << stats.corrTotalMagnitude << " cp\n";
-    std::cout << "=================================================================\n";
-    
-    controller.printBenchmarkReport(maxDepth, 16, 1);
+        uint64_t totalLmr = stats.lmrAttempts;
+        double researchRate = totalLmr > 0 ? (static_cast<double>(stats.lmrResearches) / totalLmr) * 100.0 : 0.0;
+        double successRate = stats.lmrResearches > 0 ? (static_cast<double>(stats.successfulResearches) / stats.lmrResearches) * 100.0 : 0.0;
+
+        std::cout << "  -> Triggered Re-Searches   : " << stats.lmrResearches << " (" << researchRate << "% of reduced nodes)\n";
+        std::cout << "  -> Successful PV Overturns : " << stats.successfulResearches << " (" << successRate << "% efficiency)\n";
+
+        std::cout << "\n--- Counter-Move History (CMH) Analytics ---\n";
+        std::cout << "  -> CMH Table Hits          : " << stats.cmhHits << "\n";
+        std::cout << "  -> CMH Triggered Cutoffs   : " << stats.cmhCutoffs << "\n";
+
+        std::cout << "\n--- Continuation History Analytics ---\n";
+        std::cout << "  -> Continuation Table Hits : " << stats.conthistHits << "\n";
+        std::cout << "  -> Continuation Cutoffs    : " << stats.conthistCutoffs << "\n";
+        std::cout << "  -> Table Normalization Evts: " << stats.normalizationEvents << "\n";
+
+        std::cout << "\n--- Correction History Analytics ---\n";
+        std::cout << "  -> Bias Corrections Applied: " << stats.corrApplied << " (+:" << stats.corrPositive << " -:" << stats.corrNegative << ")\n";
+        std::cout << "  -> Evaluator Bias Updates  : " << stats.corrUpdates << "\n";
+        std::cout << "  -> Total Correction Mag    : " << stats.corrTotalMagnitude << " cp\n";
+        std::cout << "=================================================================\n";
+
+        controller.printBenchmarkReport(maxDepth, 16, 1);
+    }
 
     return lastScore;
 }

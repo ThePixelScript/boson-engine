@@ -73,6 +73,8 @@ std::string StrengthReporter::serializeJson(const MatchRecord& record) {
     json << "  \"matchConfig\": {\n";
     json << "    \"engineA\": \"" << cfg.engineA << "\",\n";
     json << "    \"engineB\": \"" << cfg.engineB << "\",\n";
+    json << "    \"engineAEvalMode\": " << cfg.paramsA.eval.evalMode << ",\n";
+    json << "    \"engineBEvalMode\": " << cfg.paramsB.eval.evalMode << ",\n";
     json << "    \"compiler\": \"" << cfg.compiler << "\",\n";
     json << "    \"buildType\": \"" << cfg.buildType << "\",\n";
     json << "    \"cpuArch\": \"" << cfg.cpuArch << "\",\n";
@@ -122,13 +124,27 @@ std::string StrengthReporter::serializeJson(const MatchRecord& record) {
         const auto& g = record.games[i];
         json << "    {\n";
         json << "      \"gameId\": " << g.gameId << ",\n";
+        json << "      \"gameInitialPosition\": \"" << g.gameInitialPosition << "\",\n";
+        json << "      \"openingId\": \"" << g.openingId << "\",\n";
+        json << "      \"openingMoveSequence\": [";
+        for (size_t m = 0; m < g.openingMoveSequence.size(); ++m) {
+            json << "\"" << g.openingMoveSequence[m] << "\"" << (m + 1 < g.openingMoveSequence.size() ? ", " : "");
+        }
+        json << "],\n";
+        json << "      \"searchStartFen\": \"" << g.searchStartFen << "\",\n";
         json << "      \"whiteEngine\": \"" << g.whiteEngine << "\",\n";
         json << "      \"blackEngine\": \"" << g.blackEngine << "\",\n";
-        json << "      \"openingId\": \"" << g.openingId << "\",\n";
         json << "      \"result\": \"" << resultToString(g.result) << "\",\n";
         json << "      \"termination\": \"" << terminationToString(g.termination) << "\",\n";
         json << "      \"plyCount\": " << g.plyCount << ",\n";
-        json << "      \"elapsedMs\": " << g.elapsedMs << "\n";
+        json << "      \"elapsedMs\": " << g.elapsedMs << ",\n";
+        json << "      \"engineMetadata\": \"" << g.engineMetadata << "\",\n";
+        json << "      \"finalFen\": \"" << g.finalFen << "\",\n";
+        json << "      \"moves\": [";
+        for (size_t m = 0; m < g.moves.size(); ++m) {
+            json << "\"" << g.moves[m] << "\"" << (m + 1 < g.moves.size() ? ", " : "");
+        }
+        json << "]\n";
         json << "    }" << (i + 1 < record.games.size() ? "," : "") << "\n";
     }
     json << "  ],\n";
@@ -148,6 +164,23 @@ bool StrengthReporter::writeJsonFile(const std::string& filepath, const MatchRec
         std::ofstream ofs(p);
         if (!ofs.is_open()) return false;
         ofs << serializeJson(record);
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+bool StrengthReporter::writePgnFile(const std::string& filepath, const MatchRecord& record) {
+    try {
+        std::filesystem::path p(filepath);
+        if (p.has_parent_path()) {
+            std::filesystem::create_directories(p.parent_path());
+        }
+        std::ofstream ofs(p);
+        if (!ofs.is_open()) return false;
+        for (const auto& g : record.games) {
+            ofs << g.pgn << "\n";
+        }
         return true;
     } catch (...) {
         return false;

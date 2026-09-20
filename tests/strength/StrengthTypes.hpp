@@ -53,8 +53,11 @@ enum class GameResult : uint8_t {
 
 struct GameRecord {
     uint32_t gameId{0};
+    std::string gameInitialPosition{"startpos"};
     std::string openingId{};
     std::string openingVersion{"1.0.0"};
+    std::vector<std::string> openingMoveSequence{};
+    std::string searchStartFen{};
     std::string whiteEngine{};
     std::string blackEngine{};
     GameResult result{GameResult::Draw};

@@ -245,8 +245,78 @@ This document outlines the architectural roadmap for the Boson chess engine, tra
       - **Classical Search Invariance:** Classical depth-6 benchmark locked at exactly **313,092 nodes** ($\Delta = 0$). Suite #38 passed all 12 acceptance gates.
       - **Status:** **Complete / Closed**.
   - **Phase 8-D (Empirical Model Progression & Strength Validation):** Sequential tournament validation of trained NNUE model candidates against frozen classical baseline (`v0.9.5-classical-enhanced`) under 200-game head-to-head matches.
-- **Exit Criteria:** Trained network achieving statistically significant positive Elo gain over Classical HCE baseline in fixed-depth/fixed-time SPRT matches ($\Delta\text{Elo} \ge +50\text{ Elo}$, SPRT Accept $H_1$).
-- **Status:** **In Progress** (Phases 8-A, 8-B, 8-C1, & 8-C2 Complete).
+    * **Status:** Complete.
+  - **Phase 8-E (Model B Domain Distillation & Architecture Reconciliation):**
+    * Model B domain blended distillation training and calibration.
+    * **Status:** **CLOSED / COMPLETE**.
+  - **Phase 8-F (Execution-Context Isolation, Strategy A Architecture & V1 Verification):**
+    * **Strategy A Architecture (Approved & Complete):**
+      - Worker A = Candidate-NNUE (`evalMode = 1`).
+      - Worker B = Control-Classical (`evalMode = 0`).
+      - Persistent execution contexts (`PersistentWorkerEngine`) with stable thread-local ownership.
+      - Strictly sequential turn-by-turn searches dispatched via task queue; zero search overlap.
+      - Explicitly: not Lazy SMP; not parallel chess search.
+      - **Canonical Directive:** *"Single-threaded search per engine; two persistent execution contexts used only for state isolation; searches are never concurrent."*
+    * **V1 Infrastructure Sanity Match (Completed, Not to be Rerun):**
+      - Exactly 2 games executed under identical configuration.
+      - Opening: One existing Phase 8-F opening from canonical book: `open_01` (Italian Game / Giuoco Piano).
+      - Opening semantics:
+        * `gameInitialPosition`: Genuine `startpos` (`rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1`).
+        * `openingId`: `open_01`.
+        * `openingMoveSequence`: 6 moves (`e2e4`, `e7e5`, `g1f3`, `b8c6`, `f1c4`, `f8c5`).
+        * `searchStartFen`: Resulting FEN before first engine search (`r1bqk1nr/pppp1ppp/2n5/2b1p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4`).
+      - Pairings:
+        * Game 1: Candidate-NNUE White / Control-Classical Black (0-1, 38 plies).
+        * Game 2: Control-Classical White / Candidate-NNUE Black (1-0, 57 plies).
+      - Match limits: Fixed depth 6, 1 search thread per engine, 16 MB hash.
+      - Active model SHA: `ef3386104547109445a47257c85afd99beef3cadbf7766566244e76a040dae92` (`models/boson-v2.nnue`).
+      - Historical model provenance: Hashes such as `0ef9d2...` and `e3a113...` remain historical provenance and are preserved.
+      - V1 Disposition: **PASS WITH REPORTING CORRECTION**.
+    * **V1 Interpretation & Scope:**
+      - V1 validates: execution-context isolation; evaluator identity; thread ownership; sequential scheduling; game-boundary state reset; within-game TT state preservation; runtime correctness.
+      - V1 does NOT establish: NNUE strength superiority; Classical superiority; meaningful Elo delta; SPRT evidence; benchmark strength ranking. V1 result is NOT strength/Elo evidence.
+    * **Telemetry Reporting Correction:**
+      - Telemetry naming/semantic defect: `opening.resultingFen` was previously reported under the ambiguous `startingFen` label. The actual game initialization remained `startpos`, followed by the approved opening move sequence.
+      - Corrected schema replaces ambiguous terminology with explicitly distinct fields: `gameInitialPosition`, `openingId`, `openingMoveSequence`, and `searchStartFen`.
+      - PGN semantics remain completely unchanged: games begin from `startpos` without synthetic `[SetUp "1"]` / `[FEN "..."]` headers; moves are recorded from move 1.
+      - Historical V1 artifacts (`checkpoints/phase8f_v1_match_record.json` and `checkpoints/phase8f_v1_games.pgn`) are preserved as historical execution artifacts that predate the naming correction.
+    * **Infrastructure Test Suite:** Suite #40 (`--phase8f`) validates Gates 8-F-1 through 8-F-8, including exact model SHA handshake, worker context isolation, evaluator binding asymmetry, sequential execution, within-game TT preservation, complete game-boundary reset, and telemetry schema separation. All 8 gates PASS with zero match execution.
+    * **Status:** **8-F IMPLEMENTATION FROZEN FOR FINAL REVIEW**.
+
+---
+
+## Phase 8-F Project Status & Work Tracker
+
+### CLOSED / COMPLETE
+- [x] Phase 8-E (Model B Domain Distillation & Remediation)
+- [x] Strategy A Architecture (Persistent Worker Contexts for Execution State Isolation)
+- [x] Strategy A Implementation (`PersistentWorkerEngine`, thread-local search/eval state)
+- [x] Strategy A Infrastructure Tests (Suite #40 Gates 8-F-1 through 8-F-8)
+- [x] V1 Execution (2 games completed under fixed depth 6)
+- [x] V1 Acceptance & Reconciliation
+- [x] V1 Telemetry Semantic Correction (`gameInitialPosition`, `openingId`, `openingMoveSequence`, `searchStartFen`)
+
+### CURRENT STATE
+- 8-F implementation frozen after reporting correction.
+- Awaiting final frozen-state review for eventual 100-game authorization.
+
+### NOT AUTHORIZED
+- **100-game benchmark = NOT AUTHORIZED**
+- Any strength benchmark = NOT AUTHORIZED
+- Elo measurement = NOT AUTHORIZED
+- SPRT = NOT AUTHORIZED
+- Expanded opening-set benchmark = NOT AUTHORIZED
+- Any production/V1-derived strength conclusion = NOT AUTHORIZED
+
+### PENDING BEFORE 100-GAME AUTHORIZATION
+1. [x] Telemetry naming/schema correction (COMPLETE)
+2. [x] Documentation synchronization (COMPLETE)
+3. [x] Implementation diff review (COMPLETE)
+4. [ ] Focused commit / freeze of exact Phase 8-F state
+5. [ ] Exact commit SHA recording
+6. [ ] Final working-tree audit
+7. [ ] Final Chief Architect review
+8. [ ] Explicit authorization for 100-game benchmark
 
 ---
 

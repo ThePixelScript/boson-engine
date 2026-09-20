@@ -27,11 +27,13 @@ struct CoutSilencer {
 } // anonymous namespace
 
 void BenchmarkRunner::resetSearchState(size_t hashSizeMb) noexcept {
-    (void)hashSizeMb;
-    Search::s_tt.clear();
-    Search::clearCMH();
-    Search::clearContHist();
-    Evaluator::getCorrHist().clear();
+    if (hashSizeMb > 0) {
+        size_t targetCap = (hashSizeMb * 1024 * 1024) / sizeof(TTEntry);
+        if (Search::s_tt.getCapacity() != targetCap) {
+            Search::resizeTT(hashSizeMb);
+        }
+    }
+    Search::clearAllSearchState();
     SearchController::getInstance().getStats().reset();
 }
 

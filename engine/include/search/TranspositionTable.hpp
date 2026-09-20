@@ -26,6 +26,8 @@ class TranspositionTable {
 public:
     explicit TranspositionTable(size_t megaBytes) noexcept;
     void clear() noexcept;
+    void resize(size_t megaBytes) noexcept;
+    [[nodiscard]] size_t getCapacity() const noexcept { return m_capacity; }
 
     void store(uint64_t key, int score, Move bestMove, int depth, TTNodeType type, uint8_t generation) noexcept;
     bool probe(uint64_t key, int& score, Move& bestMove, int& depth, TTNodeType& type, int alpha, int beta) noexcept;

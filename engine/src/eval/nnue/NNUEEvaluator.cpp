@@ -286,10 +286,16 @@ void NNUEEvaluator::resetToSyntheticModel(uint32_t seed) {
 }
 
 NNUEEvaluator& NNUEEvaluator::getInstance() noexcept {
-    if (!s_activeEvaluator) {
+    if (!s_activeModel) {
         resetToSyntheticModel(1337);
     }
-    return *s_activeEvaluator;
+    static thread_local std::unique_ptr<NNUEEvaluator> t_threadEvaluator = nullptr;
+    static thread_local const NetworkModel* t_lastModel = nullptr;
+    if (!t_threadEvaluator || t_lastModel != s_activeModel.get()) {
+        t_threadEvaluator = std::make_unique<NNUEEvaluator>(*s_activeModel);
+        t_lastModel = s_activeModel.get();
+    }
+    return *t_threadEvaluator;
 }
 
 void NNUEEvaluator::setHardExitOnFailure(bool enable) noexcept {

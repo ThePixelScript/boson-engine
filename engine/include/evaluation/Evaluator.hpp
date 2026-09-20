@@ -22,7 +22,7 @@ public:
     [[nodiscard]] static CorrectionHistoryTable& getMutableCorrHist() noexcept { return s_corrTable; }
 
 private:
-    static inline CorrectionHistoryTable s_corrTable{};
+    static inline thread_local CorrectionHistoryTable s_corrTable{};
 };
 
 using Evaluation = Evaluator;
