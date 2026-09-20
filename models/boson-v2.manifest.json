@@ -2,7 +2,7 @@
   "format": "BOSN_NNUE_V1",
   "model_file": "models/boson-v2.nnue",
   "size_bytes": 41978176,
-  "sha256": "e3a11394694652258b2f2445ad5719a67769763c8b088db1243867d17e41676e",
+  "sha256": "ef3386104547109445a47257c85afd99beef3cadbf7766566244e76a040dae92",
   "architecture": {
     "magic": "0x4e4e5545",
     "version": 1,
@@ -12,7 +12,7 @@
     "fc1_output": 32,
     "fc2_output": 32,
     "fc3_output": 1,
-    "output_scale": 16
+    "output_scale": 64
   },
   "tensors": {
     "ft_biases": {
@@ -39,9 +39,9 @@
       "shape": [
         32
       ],
-      "min": -1,
-      "max": 8,
-      "sha256": "747012b2e9031b6a73443051acc164e1cd9b090fc6f2eb118e5b28759062cc51"
+      "min": -12,
+      "max": 96,
+      "sha256": "f282dab3974fd479a024a519b8a8af4aaefa403fa2c133b5f167fc9fb21c6c13"
     },
     "fc1_weights": {
       "dtype": "int8",
@@ -49,10 +49,10 @@
         32,
         1024
       ],
-      "min": -1,
-      "max": 1,
-      "zero_count": 32289,
-      "sha256": "3c0618dc3b6437d39dd1541b331996280f60202b9a21b981336996f031aaefb1"
+      "min": -24,
+      "max": 24,
+      "zero_count": 31149,
+      "sha256": "50232cad0730bc7148d6ac0e23c2b90ba2838d87827da6032e6a5d0ff9799dc5"
     },
     "fc2_biases": {
       "dtype": "int32",
@@ -61,7 +61,7 @@
       ],
       "min": -1,
       "max": 6,
-      "sha256": "d546b8263901fa9b52d0606abfb107bd4f0b2634dfb2e29f4182252cba5df980"
+      "sha256": "7afa2fe418feba7e8e17cd6ac54a2a7d80bfaf47e04235c60b2d75290c059f61"
     },
     "fc2_weights": {
       "dtype": "int8",
@@ -69,24 +69,24 @@
         32,
         32
       ],
-      "min": -34,
-      "max": 39,
-      "zero_count": 35,
-      "sha256": "7cd8b82c5a18cbfc81356af2eb06784aa8ffe152355509dbefe40b831626b31c"
+      "min": -6,
+      "max": 6,
+      "zero_count": 270,
+      "sha256": "f560269693358606b7b13b249cdefc4ab13ccd83f856875a7bf5e2fedb88cc0e"
     },
     "fc3_bias": {
       "dtype": "int32",
-      "val": 0
+      "val": -627
     },
     "fc3_weights": {
       "dtype": "int8",
       "shape": [
         32
       ],
-      "min": -1,
-      "max": 1,
-      "zero_count": 27,
-      "sha256": "3158d53f2380a582625c4fabe80cd0d902fd74d0d3e4c0385ee59b6fe4bf337d"
+      "min": -128,
+      "max": 127,
+      "zero_count": 2,
+      "sha256": "c03effd079eedbc58a5f20684c83c27013b66d271264898ee41859c731c082fe"
     }
   }
 }

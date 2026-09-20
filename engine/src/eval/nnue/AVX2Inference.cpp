@@ -127,8 +127,8 @@ int32_t AVX2Inference::evaluate(const Accumulator& acc,
     __m256i prod32 = _mm256_madd_epi16(prod16, ones);
     int32_t fc3_raw = hsum8_epi32(prod32) + model.fc3_bias;
 
-    int32_t score = fc3_raw * NNUE_OUTPUT_SCALE; // * 16
-    return std::clamp<int32_t>(score, NNUE_EVAL_MIN, NNUE_EVAL_MAX);
+    int64_t scaled = static_cast<int64_t>(fc3_raw) * 16;
+    return std::clamp<int32_t>(static_cast<int32_t>(scaled), NNUE_EVAL_MIN, NNUE_EVAL_MAX);
 }
 
 LayerDiagnostics AVX2Inference::evaluateDetailed(const Accumulator& acc,
@@ -181,8 +181,8 @@ LayerDiagnostics AVX2Inference::evaluateDetailed(const Accumulator& acc,
     int32_t fc3_raw = hsum8_epi32(prod32) + model.fc3_bias;
     diag.fc3_raw = fc3_raw;
 
-    int32_t score = fc3_raw * NNUE_OUTPUT_SCALE; // * 16
-    diag.final_score = std::clamp<int32_t>(score, NNUE_EVAL_MIN, NNUE_EVAL_MAX);
+    int64_t scaled = static_cast<int64_t>(fc3_raw) * 16;
+    diag.final_score = std::clamp<int32_t>(static_cast<int32_t>(scaled), NNUE_EVAL_MIN, NNUE_EVAL_MAX);
 
     return diag;
 }

@@ -50,8 +50,8 @@ LayerDiagnostics ScalarInference::evaluateDetailed(const Accumulator& acc,
     diag.fc3_raw = sum;
 
     // Output scaling and explicit bounds clamping
-    int32_t score = sum * NNUE_OUTPUT_SCALE; // * 16
-    diag.final_score = std::clamp<int32_t>(score, NNUE_EVAL_MIN, NNUE_EVAL_MAX);
+    int64_t scaled = static_cast<int64_t>(sum) * 16;
+    diag.final_score = std::clamp<int32_t>(static_cast<int32_t>(scaled), NNUE_EVAL_MIN, NNUE_EVAL_MAX);
 
     return diag;
 }
