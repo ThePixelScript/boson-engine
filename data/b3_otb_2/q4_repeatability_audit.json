@@ -1,0 +1,17 @@
+{
+  "audit_id": "AUDIT-B3-OTB-2-Q4-REPEATABILITY",
+  "passes_executed": 2,
+  "pass1_timestamp": "2026-09-29T19:46:02Z",
+  "pass2_timestamp": "2026-09-29T19:46:02Z",
+  "bit_for_bit_identical": true,
+  "comparison_metrics": {
+    "collision_keys_match": true,
+    "arm_a_game_sequence_match": true,
+    "arm_b_game_sequence_match": true,
+    "candidate_position_ids_match": true,
+    "canonical_board_keys_match": true,
+    "ownership_allocation_match": true,
+    "capacity_records_match": true,
+    "shortfall_verdict_match": true
+  }
+}

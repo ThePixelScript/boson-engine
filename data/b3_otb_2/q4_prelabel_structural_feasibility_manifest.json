@@ -1,0 +1,231 @@
+{
+  "amendment_id": "B3-OTB-2-Q4-A4",
+  "specification_id": "SPEC-B3-OTB-2-Q4-PRELABEL-STRUCTURAL-FEASIBILITY-AUDIT",
+  "specification_version": "4.0-AUTHORIZED-AUDIT",
+  "status": "FAIL-CLOSED",
+  "governance_decision": "FAIL-CLOSED",
+  "epistemic_boundary_declaration": "Q4 structural feasibility establishes only that the amended candidate construction has sufficient pre-label structural capacity under the frozen collision and game-level rules. Finite-CP feasibility remains unknown until authorized teacher labeling.",
+  "lineage": {
+    "parent_q2_3_spec_sha256": "08f7ece7cb47967890690b7d2c007973fe2c2a25df4df6470feec02fc23438af",
+    "parent_q2_3_manifest_sha256": "b3c06d2032b79e5dbf96764699347b104100d5d1c6d4165b2e894e630e270b95",
+    "q4_draft_4_spec_sha256": "e08e711d1a87abe385ec928f90a12777f774329b105556e81a55a424518ee0fc",
+    "q4_draft_4_manifest_sha256": "d1a04ad06103f91679ea2cb8d6527729f4f348feae2a8ea5440544e084c29762",
+    "frozen_blind_benchmark_sha256": "d8934c5c90d93bf6a8885d56f5d2c24f247466c9b8d33a45ccf5ea3865a5dc82",
+    "production_model_sha256": "ef3386104547109445a47257c85afd99beef3cadbf7766566244e76a040dae92"
+  },
+  "collision_protocol": {
+    "version": "Symmetric-Hash-Parity-v1",
+    "namespace": "B3-OTB-2-Q4-COLLISION-v1:",
+    "total_collision_keys": 14591,
+    "arm_a_owned_keys": 7304,
+    "arm_b_owned_keys": 7287,
+    "distinct_owners_per_key": 1,
+    "non_collision_reassignment": false
+  },
+  "within_game_duplicate_handling": {
+    "rule": "Q4-I14: Within a selected source game, repeated canonical_board_key occurrences at different plies are not deduplicated.",
+    "arm_a_duplicate_occurrences_preserved": 1061,
+    "arm_b_duplicate_occurrences_preserved": 1137
+  },
+  "arm_a": {
+    "arm_identifier": "CARLSEN-REAL-9965",
+    "source_game_count": 848,
+    "required_finite_positions": 9965,
+    "raw_candidate_capacity": 65464,
+    "historical_exclusion_count": 809,
+    "blind_exclusion_count": 6,
+    "collision_occurrence_count": 15741,
+    "collision_owned_count": 7949,
+    "collision_lost_count": 7792,
+    "final_structural_capacity": 56857,
+    "realized_finite_positions_post_labeling": null,
+    "assigned_k_12_games": 637,
+    "assigned_k_11_games": 211,
+    "failed_games_count": 6,
+    "failed_games": [
+      {
+        "source_game_key": "00bab15ed5b14c9a3b35a7c6a13ff3b99bbcc7114e4558526880f2c781bafeb9",
+        "rank": 3,
+        "assigned_K": 12,
+        "structural_capacity": 9,
+        "shortfall": 3
+      },
+      {
+        "source_game_key": "0509f66abf9b5e2be3ef6a9eeccc1b44bd399b8c996e412c13ed4f7271a9be4b",
+        "rank": 20,
+        "assigned_K": 12,
+        "structural_capacity": 6,
+        "shortfall": 6
+      },
+      {
+        "source_game_key": "13f2c8c0e26ff64ce0344b300a9348be627a8a7b9880037a1450ce9fe4003a1f",
+        "rank": 66,
+        "assigned_K": 12,
+        "structural_capacity": 11,
+        "shortfall": 1
+      },
+      {
+        "source_game_key": "2ac07be82418b825c0799baeee977456c15dc6002061e0c21ca47eefbee61c09",
+        "rank": 140,
+        "assigned_K": 12,
+        "structural_capacity": 11,
+        "shortfall": 1
+      },
+      {
+        "source_game_key": "3760bb39b56d4e1c481e9e684a58e706c720ddfc3cd7b49f6468ec7092a491f4",
+        "rank": 183,
+        "assigned_K": 12,
+        "structural_capacity": 6,
+        "shortfall": 6
+      },
+      {
+        "source_game_key": "c931ba0c235ac128480bde2056a3caa40dcc27846d82dd5617e2395b8e5f61e3",
+        "rank": 666,
+        "assigned_K": 11,
+        "structural_capacity": 8,
+        "shortfall": 3
+      }
+    ],
+    "structural_status": "SHORTFALL"
+  },
+  "arm_b": {
+    "arm_identifier": "MULTI-ELITE-REAL-9965",
+    "source_game_count": 848,
+    "required_finite_positions": 9965,
+    "raw_candidate_capacity": 63272,
+    "historical_exclusion_count": 906,
+    "blind_exclusion_count": 3,
+    "collision_occurrence_count": 15729,
+    "collision_owned_count": 7804,
+    "collision_lost_count": 7925,
+    "final_structural_capacity": 54438,
+    "realized_finite_positions_post_labeling": null,
+    "failed_games_count": 6,
+    "failed_games": [
+      {
+        "overall_rank": 173,
+        "player": "CARLSEN_MAGNUS",
+        "player_rank": 3,
+        "source_game_key": "00bab15ed5b14c9a3b35a7c6a13ff3b99bbcc7114e4558526880f2c781bafeb9",
+        "assigned_K": 12,
+        "structural_capacity": 6,
+        "shortfall": 6
+      },
+      {
+        "overall_rank": 183,
+        "player": "CARLSEN_MAGNUS",
+        "player_rank": 13,
+        "source_game_key": "046af20d5a74cdebbc2c07b0d4cf1babe30775a7d7a1889fe4aa2e140aa3d697",
+        "assigned_K": 12,
+        "structural_capacity": 11,
+        "shortfall": 1
+      },
+      {
+        "overall_rank": 197,
+        "player": "CARLSEN_MAGNUS",
+        "player_rank": 27,
+        "source_game_key": "081b6da9a5ade734a50c71f5a3a210c0de5d209a2aeaeef152e9385fdb581f3f",
+        "assigned_K": 12,
+        "structural_capacity": 11,
+        "shortfall": 1
+      },
+      {
+        "overall_rank": 238,
+        "player": "CARLSEN_MAGNUS",
+        "player_rank": 68,
+        "source_game_key": "168bc79f06f6ff31151ad893caf343c6fbb494f7999ed61c6f78ba9b04448a10",
+        "assigned_K": 12,
+        "structural_capacity": 11,
+        "shortfall": 1
+      },
+      {
+        "overall_rank": 459,
+        "player": "CARUANA_FABIANO",
+        "player_rank": 119,
+        "source_game_key": "1bfb936ea9f6f0ae3fd859e1463b3a49657fcc69945719c72826ec4e46247e89",
+        "assigned_K": 12,
+        "structural_capacity": 6,
+        "shortfall": 6
+      },
+      {
+        "overall_rank": 676,
+        "player": "DING_LIREN",
+        "player_rank": 166,
+        "source_game_key": "307587b4879d1d2007bfb978ba7a9ee9de3464416d17ff8f13946f576a2a7247",
+        "assigned_K": 11,
+        "structural_capacity": 5,
+        "shortfall": 6
+      }
+    ],
+    "structural_status": "SHORTFALL",
+    "per_player_metrics": {
+      "ANAND_VISWANATHAN": {
+        "games_count": 170,
+        "raw_candidates": 11759,
+        "hist_exclusions": 204,
+        "blind_exclusions": 0,
+        "collision_occurrences": 2034,
+        "collision_owned": 1003,
+        "collision_lost": 1031,
+        "structural_capacity": 10524,
+        "failed_games_count": 0
+      },
+      "CARLSEN_MAGNUS": {
+        "games_count": 170,
+        "raw_candidates": 12849,
+        "hist_exclusions": 162,
+        "blind_exclusions": 0,
+        "collision_occurrences": 12687,
+        "collision_owned": 6336,
+        "collision_lost": 6351,
+        "structural_capacity": 6336,
+        "failed_games_count": 4
+      },
+      "CARUANA_FABIANO": {
+        "games_count": 170,
+        "raw_candidates": 13316,
+        "hist_exclusions": 198,
+        "blind_exclusions": 0,
+        "collision_occurrences": 309,
+        "collision_owned": 142,
+        "collision_lost": 167,
+        "structural_capacity": 12951,
+        "failed_games_count": 1
+      },
+      "DING_LIREN": {
+        "games_count": 169,
+        "raw_candidates": 12564,
+        "hist_exclusions": 150,
+        "blind_exclusions": 1,
+        "collision_occurrences": 346,
+        "collision_owned": 156,
+        "collision_lost": 190,
+        "structural_capacity": 12223,
+        "failed_games_count": 1
+      },
+      "NAKAMURA_HIKARU": {
+        "games_count": 169,
+        "raw_candidates": 12784,
+        "hist_exclusions": 192,
+        "blind_exclusions": 2,
+        "collision_occurrences": 353,
+        "collision_owned": 167,
+        "collision_lost": 186,
+        "structural_capacity": 12404,
+        "failed_games_count": 0
+      }
+    }
+  },
+  "cross_arm_structural_canonical_overlap": 0,
+  "repeatability_verified": true,
+  "zero_teacher_execution": {
+    "stockfish_invocations": 0,
+    "teacher_harness_invocations": 0,
+    "teacher_label_records_created": 0,
+    "training_invocations": 0,
+    "checkpoint_created": false,
+    "blind_evaluation_invocations": 0,
+    "calibration_invocations": 0,
+    "production_model_modified": false
+  }
+}

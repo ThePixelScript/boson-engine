@@ -1,0 +1,37 @@
+{
+  "audit_id": "AUDIT-B3-OTB-2-Q4-EXECUTION",
+  "timestamp": "2026-09-29T19:46:02Z",
+  "duration_seconds": 33.61,
+  "epistemic_boundary_declaration": "Q4 structural feasibility establishes only that the amended candidate construction has sufficient pre-label structural capacity under the frozen collision and game-level rules. Finite-CP feasibility remains unknown until authorized teacher labeling.",
+  "commands_executed": [
+    "python scratch/test_full_extraction.py",
+    "python scratch/build_q4_audit_engine.py"
+  ],
+  "subprocess_inventory": [
+    "python chess library pgn extraction",
+    "python hashlib sha256 calculation"
+  ],
+  "zero_teacher_execution_counters": {
+    "stockfish_invocations": 0,
+    "teacher_harness_invocations": 0,
+    "teacher_label_records_created": 0,
+    "training_invocations": 0,
+    "checkpoint_created": false,
+    "blind_evaluation_invocations": 0,
+    "calibration_invocations": 0,
+    "production_model_modified": false
+  },
+  "reproducibility_audit": {
+    "runs_executed": 2,
+    "repeatability_verified": true
+  },
+  "lineage_verification": {
+    "q2_3_spec_sha256": "08f7ece7cb47967890690b7d2c007973fe2c2a25df4df6470feec02fc23438af",
+    "q2_3_manifest_sha256": "b3c06d2032b79e5dbf96764699347b104100d5d1c6d4165b2e894e630e270b95",
+    "q4_draft_4_spec_sha256": "e08e711d1a87abe385ec928f90a12777f774329b105556e81a55a424518ee0fc",
+    "q4_draft_4_manifest_sha256": "d1a04ad06103f91679ea2cb8d6527729f4f348feae2a8ea5440544e084c29762",
+    "blind_benchmark_sha256": "d8934c5c90d93bf6a8885d56f5d2c24f247466c9b8d33a45ccf5ea3865a5dc82",
+    "production_model_sha256": "ef3386104547109445a47257c85afd99beef3cadbf7766566244e76a040dae92",
+    "status": "UNTOUCHED_AND_VERIFIED"
+  }
+}

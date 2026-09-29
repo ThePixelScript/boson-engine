@@ -1,0 +1,56 @@
+{
+  "audit_id": "AUDIT-B3-OTB-2-Q4-CANONICAL-LEAKAGE",
+  "external_datasets": {
+    "BLIND-TEST-LICHESS-2026-08-5K": {
+      "file": "data/b3a_blind_test/blind_positions_labeled.json",
+      "sha256": "d8934c5c90d93bf6a8885d56f5d2c24f247466c9b8d33a45ccf5ea3865a5dc82",
+      "role": "Frozen Common Blind Benchmark",
+      "positions_count": 5000
+    },
+    "SYN-MATCHED-SF19-20K": {
+      "file": "data/b3a_matched_datasets/syn_matched_sf19_20k.json",
+      "sha256": "0bdeb8491e0f8cb24d9b5980bd335bd4002c2d86b5d77dfa8ba98828a90dc9d9",
+      "role": "Synthetic Training Dataset (20K)",
+      "positions_count": 20000
+    },
+    "REAL-MATCHED-SF19-20K": {
+      "file": "data/b3a_matched_datasets/real_matched_sf19_20k.json",
+      "sha256": "5005dd837705e05a6ec422c92a80f723cfebe67fa5661fa608a16b71168b271f",
+      "role": "Real Matched Training Dataset (20K)",
+      "positions_count": 20000
+    },
+    "STRONG-OTB-01": {
+      "file": "data/strong_otb/STRONG-OTB-01/labeled_positions.json",
+      "sha256": "f72dd20d0f553f981c98dbe6883adf3174f59ef83496fa4a8aafebda4bd9f450",
+      "role": "Strong OTB Reference Dataset (10K)",
+      "positions_count": 10000
+    },
+    "REAL-MATCHED-SF19-9965": {
+      "file": "data/b3a_matched_datasets/REAL-MATCHED-SF19-9965/positions.json",
+      "sha256": "ab56e109bd5c841850faa9ac985d74e6571c6fc8dbf24563d35966c21a3c4398",
+      "role": "B3-OTB-1 Real Control Dataset (9,965)",
+      "positions_count": 9965
+    }
+  },
+  "blind_gamekey_overlap": {
+    "arm_a": 0,
+    "arm_b": 0,
+    "status": "PASS"
+  },
+  "canonical_board_key_definition": "<piece_placement> <side_to_move> <castling_rights> <ep_square>",
+  "legal_en_passant_normalization_rule": "Retained iff opposing legal ep capture exists; else '-'",
+  "collision_keys_count": 14591,
+  "arm_a_collision_owned_keys": 7304,
+  "arm_b_collision_owned_keys": 7287,
+  "cross_arm_structural_canonical_overlap": {
+    "observed_overlap_count": 0,
+    "target": 0,
+    "status": "PASS"
+  },
+  "historical_canonical_leakage": {
+    "arm_a_leakage": 0,
+    "arm_b_leakage": 0,
+    "status": "PASS"
+  },
+  "epistemic_boundary_declaration": "This is a PRE-LABEL structural canonical leakage audit. Final post-labeling disjointness will be re-verified upon authorized teacher labeling."
+}
