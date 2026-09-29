@@ -1,0 +1,148 @@
+{
+  "amendment_id": "B3-OTB-2-Q4-A1",
+  "amendment_title": "Final-Admitted Canonical Disjointness Protocol",
+  "amendment_version": "1.0-Q4-DRAFT-1",
+  "status": "Q4 AMENDMENT DRAFT 1 — PENDING GPT-1 REVIEW (NOT YET RATIFIED)",
+  "timestamp": "2026-09-30T00:35:00Z",
+  "governance": {
+    "authorization_state": "DESIGN_ONLY_PENDING_GPT1_RATIFICATION",
+    "execution_authorized": false,
+    "epistemic_boundary_declaration": "Q4 establishes the theoretical and structural architecture for cross-arm disjointness only. Pre-label candidate feasibility and post-label finite-CP feasibility remain strictly governed by sequential authorization gates."
+  },
+  "lineage": {
+    "parent_q2_3_spec_file": "docs/B3_OTB_2_SUPERSEDING_DESIGN_SPEC_Q2_3_DRAFT.md",
+    "parent_q2_3_spec_sha256": "08f7ece7cb47967890690b7d2c007973fe2c2a25df4df6470feec02fc23438af",
+    "parent_q2_3_manifest_file": "data/b3_otb_2/superseding_design_manifest_q2_3_draft.json",
+    "parent_q2_3_manifest_sha256": "b3c06d2032b79e5dbf96764699347b104100d5d1c6d4165b2e894e630e270b95",
+    "q3_audit_status": "CLOSED / FAIL-CLOSED (197 structural failures, 474 reservation-affected games under superseded Q2.3 pre-label whole-stream reservation)",
+    "frozen_blind_benchmark_file": "data/b3a_blind_test/blind_positions_labeled.json",
+    "frozen_blind_benchmark_sha256": "d8934c5c90d93bf6a8885d56f5d2c24f247466c9b8d33a45ccf5ea3865a5dc82",
+    "production_nnue_model_file": "models/boson-v2.nnue",
+    "production_nnue_model_sha256": "ef3386104547109445a47257c85afd99beef3cadbf7766566244e76a040dae92"
+  },
+  "scientific_question": "Under identical NNUE architecture, teacher, training volume, initialization, optimization, and training budget, does replacing a Carlsen-only real-game training composition with a diversified multi-elite real-game composition change out-of-sample static-evaluation error on the same frozen blind population?",
+  "changed_variables": {
+    "cross_arm_leakage_mechanism": {
+      "superseded_q2_3_rule": "Reserve every canonical board appearing in the complete Arm-A candidate stream before Arm-B candidate admission (R_A = all canonical boards from full Arm-A stream).",
+      "amended_q4_rule": "Construct Arm-A and Arm-B candidate streams independently under frozen source and candidate rules, then enforce zero canonical-board overlap at final dataset admission through a pre-frozen, deterministic, teacher-score-independent collision ownership protocol: Keys(D_A) intersect Keys(D_B) = empty set."
+    }
+  },
+  "immutable_controls": {
+    "source_corpora_basis": "PGN Mentor and TWIC Issues 948-1625 reconciled 848 universe",
+    "era_window": "2013-01-01 through 2025-12-31 inclusive",
+    "time_control": "Classical OTB only",
+    "arm_a_universe": "848 classical OTB Carlsen games",
+    "arm_b_cohort": [
+      "ANAND_VISWANATHAN",
+      "CARLSEN_MAGNUS",
+      "CARUANA_FABIANO",
+      "DING_LIREN",
+      "NAKAMURA_HIKARU"
+    ],
+    "arm_b_game_quotas": {
+      "ANAND_VISWANATHAN": 170,
+      "CARLSEN_MAGNUS": 170,
+      "CARUANA_FABIANO": 170,
+      "DING_LIREN": 169,
+      "NAKAMURA_HIKARU": 169
+    },
+    "h2h_ownership_rule": "Lexicographical min(canonical_player_id)",
+    "candidate_ply_range": "12..120 inclusive (1-based half-move count)",
+    "candidate_position_id_format": "<source_game_key>:<ply>",
+    "canonical_board_key_format": "<piece_placement> <side_to_move> <castling_rights> <ep_square>",
+    "en_passant_normalization": "ep_square retained iff opposing legal ep capture exists; else '-'",
+    "teacher_engine": {
+      "name": "Stockfish 19",
+      "commit": "edb0d9d",
+      "binary_sha256": "45bc8e4969147db9c2eb533810637994619bff0eacc81ccfd9854394901bcbd0",
+      "network": "nn-1a298aa575a0.nnue",
+      "go_nodes": 100000,
+      "threads": 1,
+      "hash": 64
+    },
+    "training_topology": "HalfKP (40960x2) -> 1024 -> 32 -> 32 -> 1",
+    "optimizer": "AdamW (lr=0.001, wd=0.0001, betas=[0.9, 0.999], eps=1e-8)",
+    "exact_volumes": {
+      "arm_a_finite_positions": 9965,
+      "arm_b_finite_positions": 9965,
+      "arm_b_per_player_finite_positions": 1993
+    }
+  },
+  "collision_ownership_protocol": {
+    "version": "Symmetric-Hash-Parity-v1",
+    "namespace": "B3-OTB-2-Q4-COLLISION-v1:",
+    "hash_function": "SHA256(namespace + canonical_board_key)",
+    "partition_rule": "val = int(digest[0:8], 16); Owner = Arm A if (val % 2 == 0) else Arm B",
+    "discard_policy": "If position receives non-finite teacher score, it remains permanently burned and cannot be rescued by opposing arm",
+    "properties": {
+      "symmetric": true,
+      "deterministic": true,
+      "teacher_independent": true,
+      "model_independent": true,
+      "blind_independent": true,
+      "bit_for_bit_repeatable": true
+    }
+  },
+  "admission_order_lifecycle": [
+    "Stage A: Source Eligibility (2013-2025 classical OTB)",
+    "Stage B: Deterministic Source Game Selection (848 games/arm)",
+    "Stage C: Candidate Generation & Ordering (plies 12..120 ascending)",
+    "Stage D: External Leakage Exclusions (Blind 5K, SYN-20K, REAL-20K, STRONG-OTB, REAL-9965)",
+    "Stage E: Cross-Arm Canonical Collision Detection",
+    "Stage F: Deterministic Collision Ownership Assignment (Symmetric Hash Parity)",
+    "Stage G: Teacher Labeling & Finite-CP Admission (Stockfish 19, |cp| < 30000)",
+    "Stage H: Exact-Volume Dataset Closure (9,965 positions/arm; deterministic intra-cohort refill)"
+  ],
+  "statistical_contract": {
+    "primary_paired_estimator": "Delta_i = |E_A(i) - T(i)| - |E_B(i) - T(i)|",
+    "primary_summary_metric": "Mean Delta = (1/N) * sum(Delta_i)",
+    "benchmark_path": "data/b3a_blind_test/blind_positions_labeled.json",
+    "benchmark_sha256": "d8934c5c90d93bf6a8885d56f5d2c24f247466c9b8d33a45ccf5ea3865a5dc82",
+    "resample_cluster_unit": "source_game_key",
+    "bootstrap_resamples": 10000,
+    "seed": 42,
+    "confidence_interval": 0.95
+  },
+  "open_architectural_choices_for_gpt1": [
+    {
+      "choice_id": "CHOICE_1_COLLISION_ALGORITHM",
+      "description": "Selection of primary collision partitioning mechanism",
+      "options": [
+        "Option 1A: Symmetric Hash Parity (SHA-256 parity 50/50 uniform split)",
+        "Option 1B: Post-Label Arm-A Admission Reservation (R_A* = admitted 9,965 Arm-A positions)",
+        "Option 1C: Player-Origin Ownership (Arm B non-Carlsen ownership priority)"
+      ]
+    },
+    {
+      "choice_id": "CHOICE_2_TIMING_OF_PARTITIONING",
+      "description": "Stage at which collisions are resolved",
+      "options": [
+        "Pre-Label Partitioning (Stage F, fully teacher-blind)",
+        "Post-Label Dynamic Partitioning (evaluated only on teacher-confirmed finite positions)"
+      ]
+    },
+    {
+      "choice_id": "CHOICE_3_REFILL_POLICY",
+      "description": "Mechanism for exact-volume closure when game exhausted",
+      "options": [
+        "Option 3A: Sequential spare game borrowing within same player pool",
+        "Option 3B: Intra-game ply expansion (K -> 13) before inter-game pool borrowing"
+      ]
+    }
+  ],
+  "required_verification_gates": [
+    "Gate 1: Q4 Design Specification Ratification by GPT-1",
+    "Gate 2: Q4 Deterministic Selection Audit",
+    "Gate 3: Q4 Pre-Labeling Structural Feasibility Audit",
+    "Gate 4: Q4 Final Canonical Disjointness Audit (Keys(D_A) cap Keys(D_B) = emptyset)",
+    "Gate 5: Q4 Distributional Fidelity Audit",
+    "Gate 6: Q4 Repeatability Audit"
+  ],
+  "no_downstream_assertions": {
+    "teacher_invocations": 0,
+    "training_invocations": 0,
+    "evaluation_invocations": 0,
+    "calibration_invocations": 0,
+    "production_model_modified": false
+  }
+}
