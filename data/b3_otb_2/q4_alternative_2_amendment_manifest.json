@@ -1,0 +1,127 @@
+{
+  "amendment_id": "B3-OTB-2-Q4-ALT2",
+  "amendment_title": "Frozen Q4 Collision Ownership + Deterministic Pre-Label Variable Game Allocation",
+  "amendment_version": "1.0-RATIFIED-SPEC",
+  "status": "RATIFIED_PENDING_STRUCTURAL_FEASIBILITY_AUDIT",
+  "timestamp": "2026-09-30T18:05:00Z",
+  "governance": {
+    "ratification_authority": "GPT-1",
+    "ratification_disposition": "RATIFIED / READY FOR STRUCTURAL FEASIBILITY AUDIT",
+    "ratified_amendment": "Frozen Q4 Collision Ownership + Deterministic Pre-Label Variable Game Allocation",
+    "implementation_authorized": false,
+    "structural_audit_authorized_next": true,
+    "execution_boundary_declaration": "This checkpoint creates and archives the ratified amendment specification and manifest only. Zero solver/audit/Stockfish/teacher/training/evaluation execution authorized."
+  },
+  "parent": {
+    "q4_draft4_spec_file": "docs/B3_OTB_2_Q4_DESIGN_AMENDMENT_DRAFT_4.md",
+    "q4_draft4_spec_sha256": "e08e711d1a87abe385ec928f90a12777f774329b105556e81a55a424518ee0fc",
+    "q4_draft4_manifest_file": "data/b3_otb_2/q4_design_amendment_manifest_draft_4.json",
+    "q4_draft4_manifest_sha256": "d1a04ad06103f91679ea2cb8d6527729f4f348feae2a8ea5440544e084c29762"
+  },
+  "changed_rule": "fixed_per_game_K_to_prelabel_integer_k",
+  "candidate_ply_min": 12,
+  "candidate_ply_max": 120,
+  "arm_a_target": 9965,
+  "arm_b_target": 9965,
+  "arm_b_player_target": 1993,
+  "objective": {
+    "level_1": "minimize_sum_abs_k_minus_K",
+    "level_2": "minimize_sum_squared_k_minus_K",
+    "level_3": "lexicographically_smallest_k_vector"
+  },
+  "coordinate_order": [
+    "Arm A source_game_key bytewise ascending",
+    "Arm B player ANAND_VISWANATHAN source_game_key bytewise ascending",
+    "Arm B player CARLSEN_MAGNUS source_game_key bytewise ascending",
+    "Arm B player CARUANA_FABIANO source_game_key bytewise ascending",
+    "Arm B player DING_LIREN source_game_key bytewise ascending",
+    "Arm B player NAKAMURA_HIKARU source_game_key bytewise ascending"
+  ],
+  "collision_ownership": "frozen_q4",
+  "teacher_independent": true,
+  "model_independent": true,
+  "implementation_authorized": false,
+  "structural_audit_authorized_next": true,
+  "source_parent_references": {
+    "parent_spec": "docs/B3_OTB_2_Q4_DESIGN_AMENDMENT_DRAFT_4.md",
+    "parent_manifest": "data/b3_otb_2/q4_design_amendment_manifest_draft_4.json",
+    "q2_3_spec": "docs/B3_OTB_2_SUPERSEDING_DESIGN_SPEC_Q2_3_DRAFT.md",
+    "q2_3_manifest": "data/b3_otb_2/superseding_design_manifest_q2_3_draft.json",
+    "blind_benchmark": "data/b3a_blind_test/blind_positions_labeled.json",
+    "blind_benchmark_sha256": "d8934c5c90d93bf6a8885d56f5d2c24f247466c9b8d33a45ccf5ea3865a5dc82",
+    "production_nnue": "models/boson-v2.nnue",
+    "production_nnue_sha256": "ef3386104547109445a47257c85afd99beef3cadbf7766566244e76a040dae92"
+  },
+  "frozen_rule_inventory": {
+    "arm_a_games": 848,
+    "arm_b_games": 848,
+    "arm_b_player_games": {
+      "ANAND_VISWANATHAN": 170,
+      "CARLSEN_MAGNUS": 170,
+      "CARUANA_FABIANO": 170,
+      "DING_LIREN": 169,
+      "NAKAMURA_HIKARU": 169
+    },
+    "source_corpora": "PGN Mentor + TWIC Issues 948-1625 reconciled universe",
+    "era_window": "2013-01-01 through 2025-12-31 inclusive",
+    "time_control": "Classical OTB only",
+    "candidate_range": "12..120 inclusive",
+    "candidate_position_id_format": "<source_game_key>:<decimal_ply>",
+    "occurrence_semantics": "All capacities occurrence-level; repeated canonical boards within game remain distinct; no canonical deduplication",
+    "canonical_normalization": "4-field FEN with legal en-passant normalization",
+    "historical_leakage_filtering": "SYN-20K, REAL-20K, STRONG-OTB, REAL-9965",
+    "blind_leakage_filtering": "data/b3a_blind_test/blind_positions_labeled.json",
+    "collision_mechanism": "Symmetric-Hash-Parity-v1 on UTF-8 'B3-OTB-2-Q4-COLLISION-v1:' + canonical_board_key",
+    "collision_ownership_inheritance": "All occurrences of collision key inherit designated owner; non-collision occurrences remain with origin arm",
+    "disjointness_property": "Keys(S_A) intersect Keys(S_B) = empty set",
+    "teacher_config": "Stockfish 19 (commit edb0d9d, binary 45bc8e49..., network nn-1a298aa575a0.nnue, go_nodes 100000, threads 1, hash 64)",
+    "training_config": "HalfKP (40960x2->1024->32->32->1), AdamW, cosine schedule, 780 steps, batch size 16384, seed 42",
+    "statistical_contract": "Delta_i = |E_A(i) - T(i)| - |E_B(i) - T(i)|, 10000 paired cluster-bootstrap resamples by source_game_key, seed 42"
+  },
+  "deficit_definition": {
+    "formula": "D(g) = max(0, K(g) - F(g))",
+    "expected_values_gpt1_informational": {
+      "arm_a_deficit_expected": 13,
+      "arm_b_deficit_expected": 21,
+      "total_deficit_expected": 34,
+      "expected_min_l1": 68
+    },
+    "derivation_rule": "Future audit must derive D(g) independently from exact K(g) and F(g) records without hardcoding."
+  },
+  "mathematical_identities": {
+    "l1_identity": "L1 = sum |k(g) - K(g)| = 2 * sum_{k(g) < K(g)} (K(g) - k(g)) = 2 * Total Downward Deviation"
+  },
+  "feasibility_theorem": {
+    "statement": "An integer allocation satisfying 0 <= k(g) <= F(g) and sum k(g) = T exists iff 0 <= T <= sum F(g)",
+    "arm_a_capacity": 56857,
+    "arm_a_target": 9965,
+    "arm_b_capacity": 54438,
+    "arm_b_target": 9965,
+    "arm_b_player_capacities": {
+      "ANAND_VISWANATHAN": 10524,
+      "CARLSEN_MAGNUS": 6336,
+      "CARUANA_FABIANO": 12951,
+      "DING_LIREN": 12223,
+      "NAKAMURA_HIKARU": 12404
+    },
+    "arm_b_player_target": 1993,
+    "status": "EXISTENCE_THEOREM_PROVEN_AUDIT_EXECUTION_PENDING"
+  },
+  "expected_future_artifacts": [
+    "docs/B3_OTB_2_Q4_ALTERNATIVE_2_STRUCTURAL_AUDIT_REPORT.md",
+    "data/b3_otb_2/q4_alternative_2_structural_allocation.json"
+  ],
+  "downstream_execution_assertions": {
+    "optimizer_invocations": 0,
+    "k_vector_generated": false,
+    "candidate_occurrences_materialized": 0,
+    "stockfish_invocations": 0,
+    "teacher_harness_invocations": 0,
+    "teacher_label_records_created": 0,
+    "training_invocations": 0,
+    "checkpoint_created": false,
+    "blind_evaluation_invocations": 0,
+    "calibration_invocations": 0,
+    "production_model_modified": false
+  }
+}
