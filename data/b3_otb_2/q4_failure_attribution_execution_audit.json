@@ -1,0 +1,29 @@
+{
+  "audit_id": "AUDIT-B3-OTB-2-Q4-FAILURE-ATTRIBUTION-EXECUTION",
+  "timestamp": "2026-09-30T13:23:07Z",
+  "execution_mode": "READ_ONLY_STRUCTURAL_ANALYSIS",
+  "authority": {
+    "q4_commit": "9dd30796fba15e3c3cfb90906ecd4d82e12c6cd5",
+    "q2_3_spec_sha": "08f7ece7cb47967890690b7d2c007973fe2c2a25df4df6470feec02fc23438af",
+    "q4_draft4_spec_sha": "e08e711d1a87abe385ec928f90a12777f774329b105556e81a55a424518ee0fc",
+    "q4_draft4_manifest_sha": "d1a04ad06103f91679ea2cb8d6527729f4f348feae2a8ea5440544e084c29762"
+  },
+  "zero_downstream_execution_counters": {
+    "stockfish_invocations": 0,
+    "teacher_harness_invocations": 0,
+    "teacher_label_records_created": 0,
+    "training_invocations": 0,
+    "checkpoint_created": false,
+    "blind_evaluation_invocations": 0,
+    "calibration_invocations": 0,
+    "production_model_modified": false
+  },
+  "repeatability": {
+    "passes_executed": 2,
+    "bit_for_bit_identical": true,
+    "failures_identical": true,
+    "aggregates_identical": true,
+    "invariants_identical": true
+  },
+  "disposition": "READ_ONLY_ATTRIBUTION_COMPLETE"
+}
