@@ -1,0 +1,32 @@
+{
+  "audit_id": "AUDIT-B3-OTB-2-Q4-ALT2-MANIFEST",
+  "amendment_id": "B3-OTB-2-Q4-ALT2",
+  "timestamp": "2026-09-30T18:25:00Z",
+  "parent_amendment_commit": "83783a21833489b7634ea3999a70013c5ce20d75",
+  "parent_spec_sha256": "335aaed15cb57435050c48f5425f3dc0b7befd38ed8da5ca5afefc30a353b3ee",
+  "parent_manifest_sha256": "01dc6a50719bee72a6ba37e78d09bd03b59a4678f691cf581f9be2e4c129b7a9",
+  "parent_q4_draft4_spec_sha256": "e08e711d1a87abe385ec928f90a12777f774329b105556e81a55a424518ee0fc",
+  "parent_q4_draft4_manifest_sha256": "d1a04ad06103f91679ea2cb8d6527729f4f348feae2a8ea5440544e084c29762",
+  "audit_status": "PASSED_STRUCTURAL_FEASIBILITY_PENDING_GPT1_REVIEW",
+  "generated_artifacts": {
+    "k_allocation": "data/b3_otb_2/q4_alternative_2_k_allocation.json",
+    "structural_feasibility_audit": "data/b3_otb_2/q4_alternative_2_structural_feasibility_audit.json",
+    "distributional_audit": "data/b3_otb_2/q4_alternative_2_distributional_audit.json",
+    "provenance_canonical_audit": "data/b3_otb_2/q4_alternative_2_provenance_canonical_audit.json",
+    "repeatability_audit": "data/b3_otb_2/q4_alternative_2_repeatability_audit.json",
+    "execution_audit": "data/b3_otb_2/q4_alternative_2_execution_audit.json",
+    "structural_audit_manifest": "data/b3_otb_2/q4_alternative_2_structural_audit_manifest.json",
+    "audit_spec": "docs/B3_OTB_2_Q4_ALTERNATIVE_2_STRUCTURAL_FEASIBILITY_AUDIT_SPEC.md",
+    "audit_report": "docs/B3_OTB_2_Q4_ALTERNATIVE_2_STRUCTURAL_FEASIBILITY_AUDIT_REPORT.md"
+  },
+  "artifact_hashes": {
+    "k_allocation": "4f8a615e8fd37c2d0e9089d1ecaa4390284e2a184739bf2eac7cee51b14947f7",
+    "structural_feasibility_audit": "c9f5407a788dd5d0753ae43d2e22ebceedda44c0e09ce7572d3141c90884f353",
+    "distributional_audit": "0ffa037054357c8221953eeba30501069fe4d6c8b2b2090c1212c6de9b38df69",
+    "provenance_canonical_audit": "52aacaa9218282a618cc5f43b8c32a89c8285ff5bf664b23f9bfab68caefcae8",
+    "repeatability_audit": "9e6d5548ce08eea032bd1d3e7d98e0e971b8c22a3107d1160c5e552f4e18dd61",
+    "execution_audit": "2e9d7367c9d576710c47fb95b8122b4c67439198763989b9e73baa513970177d",
+    "audit_spec": "a0dc3ea31c93741c72187937839762d6bdf5e36aeac4e53dea8afcd2b6518db4",
+    "audit_report": "3fdf694382d4dbba10e250e3844f2b66c4dd7e5abc3f8082e9b0576e15d1bc37"
+  }
+}

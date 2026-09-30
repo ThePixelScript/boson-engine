@@ -1,0 +1,14 @@
+{
+  "audit_id": "AUDIT-B3-OTB-2-Q4-ALT2-PROVENANCE-CANONICAL",
+  "timestamp": "2026-09-30T18:25:00Z",
+  "admitted_positions_count": 1696,
+  "total_admitted_occurrences": 19930,
+  "ply_range_valid": true,
+  "ply_min_global": 12,
+  "ply_max_global": 120,
+  "candidate_id_format_valid": true,
+  "collision_ownership_preserved": true,
+  "intra_game_duplicates_preserved": true,
+  "canonical_disjointness_verified": true,
+  "cross_arm_overlap_count": 0
+}

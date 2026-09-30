@@ -1,0 +1,111 @@
+{
+  "audit_id": "AUDIT-B3-OTB-2-Q4-ALT2-STRUCTURAL-FEASIBILITY",
+  "timestamp": "2026-09-30T18:25:00Z",
+  "governing_amendment": "B3-OTB-2-Q4-ALT2",
+  "parent_q4_draft4_sha256": "e08e711d1a87abe385ec928f90a12777f774329b105556e81a55a424518ee0fc",
+  "selected_games": {
+    "arm_a_total": 848,
+    "arm_b_total": 848,
+    "total_games": 1696
+  },
+  "volume_targets": {
+    "arm_a_target": 9965,
+    "arm_b_target": 9965,
+    "arm_b_player_target": 1993
+  },
+  "capacities_and_deficits": {
+    "arm_a": {
+      "total_structural_capacity_F": 56857,
+      "total_K": 9965,
+      "total_k": 9965,
+      "total_deficit_D": 20,
+      "failed_games_under_fixed_K": 6,
+      "feasible_games_under_variable_k": 848,
+      "L1_deviation": 40,
+      "L2_deviation": 112
+    },
+    "arm_b": {
+      "total_structural_capacity_F": 54438,
+      "total_K": 9965,
+      "total_k": 9965,
+      "total_deficit_D": 21,
+      "failed_games_under_fixed_K": 6,
+      "feasible_games_under_variable_k": 848,
+      "L1_deviation": 42,
+      "L2_deviation": 132,
+      "player_breakdown": {
+        "ANAND_VISWANATHAN": {
+          "capacity_F": 10524,
+          "target_k": 1993,
+          "deficit_D": 0,
+          "L1": 0,
+          "L2": 0
+        },
+        "CARLSEN_MAGNUS": {
+          "capacity_F": 6336,
+          "target_k": 1993,
+          "deficit_D": 9,
+          "L1": 18,
+          "L2": 48
+        },
+        "CARUANA_FABIANO": {
+          "capacity_F": 12951,
+          "target_k": 1993,
+          "deficit_D": 6,
+          "L1": 12,
+          "L2": 42
+        },
+        "DING_LIREN": {
+          "capacity_F": 12223,
+          "target_k": 1993,
+          "deficit_D": 6,
+          "L1": 12,
+          "L2": 42
+        },
+        "NAKAMURA_HIKARU": {
+          "capacity_F": 12404,
+          "target_k": 1993,
+          "deficit_D": 0,
+          "L1": 0,
+          "L2": 0
+        }
+      }
+    },
+    "global_totals": {
+      "total_structural_capacity_F": 111295,
+      "total_K": 19930,
+      "total_k": 19930,
+      "total_deficit_D": 41,
+      "global_L1": 82,
+      "global_L2": 244,
+      "mathematical_l1_identity_verified": true
+    }
+  },
+  "gpt1_expectation_comparison": {
+    "gpt1_expected_arm_a_deficit": 13,
+    "actual_derived_arm_a_deficit": 20,
+    "gpt1_expected_arm_b_deficit": 21,
+    "actual_derived_arm_b_deficit": 21,
+    "gpt1_expected_total_deficit": 34,
+    "actual_derived_total_deficit": 41,
+    "gpt1_expected_min_l1": 68,
+    "actual_derived_min_l1": 82,
+    "derivation_explanation": "In Arm A, all 6 shortfall games from frozen Q4 evidence (ranks 3, 20, 66, 140, 183, 666) have shortfalls [3, 6, 1, 1, 6, 3], summing to exactly 20. In Arm B, the 6 shortfall games have shortfalls [6, 1, 1, 1, 6, 6], summing to exactly 21. Total deficit is exactly 41, yielding theoretical minimum L1 = 2 * 41 = 82. The audit derives these exact values without forcing preliminary expectations."
+  },
+  "optimization_uniqueness": {
+    "level_1_minimized": true,
+    "level_1_value": 82,
+    "level_2_minimized": true,
+    "level_2_value": 244,
+    "level_3_lexicographically_smallest": true,
+    "uniqueness_proven": true,
+    "alternative_vectors_remaining": 0
+  },
+  "canonical_disjointness": {
+    "arm_a_admitted_keys_count": 9201,
+    "arm_b_admitted_keys_count": 9145,
+    "overlapping_keys_count": 0,
+    "status": "PASS"
+  },
+  "final_structural_disposition": "PASS_PRELABEL_STRUCTURAL_FEASIBILITY_VERIFIED"
+}
